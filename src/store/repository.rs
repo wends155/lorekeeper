@@ -43,21 +43,66 @@ pub struct MemoryStats {
 #[cfg_attr(test, mockall::automock)]
 pub trait EntryRepository: Send + Sync {
     /// Stores a new entry and returns the persisted version with its ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LoreError`] if validation, role enforcement, or database write fails.
     fn store(&self, input: NewEntry) -> Result<Entry, LoreError>;
+
     /// Retrieves an entry by its ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LoreError::NotFound`] if the entry does not exist or is deleted.
     fn get(&self, id: &str) -> Result<Entry, LoreError>;
+
     /// Updates an existing entry with new fields.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LoreError`] if the entry is not found, state transition is invalid,
+    /// UUID validation fails, or the database write fails.
     fn update(&self, id: &str, update: UpdateEntry) -> Result<Entry, LoreError>;
+
     /// Performs a soft delete on an entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LoreError::NotFound`] if the entry does not exist.
     fn delete(&self, id: &str) -> Result<(), LoreError>;
+
     /// Searches entries using full-text search.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LoreError`] if the database query fails.
     fn search(&self, query: &SearchQuery) -> Result<Vec<Entry>, LoreError>;
+
     /// Retrieves the most recently created entries.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LoreError`] if the database query fails.
     fn recent(&self, limit: u32) -> Result<Vec<Entry>, LoreError>;
+
     /// Lists entries of a specific type with filters and pagination.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LoreError`] if the database query fails.
     fn by_type(&self, entry_type: EntryType, filters: &Filters) -> Result<Vec<Entry>, LoreError>;
+
     /// Gets database statistics.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LoreError`] if the database query fails.
     fn stats(&self) -> Result<MemoryStats, LoreError>;
+
     /// Returns all entries ordered for rendering (internal use).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LoreError`] if the database query fails.
     fn render_all(&self) -> Result<Vec<Entry>, LoreError>;
 }

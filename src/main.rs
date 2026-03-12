@@ -17,6 +17,7 @@ use tracing::{Level, info};
 use tracing_subscriber::{EnvFilter, fmt};
 
 #[tokio::main]
+#[allow(clippy::too_many_lines)]
 async fn main() -> Result<(), LoreError> {
     // 1. Initialize tracing to stderr (stdout reserved for MCP JSON-RPC)
     let filter =
@@ -132,7 +133,17 @@ async fn main() -> Result<(), LoreError> {
     });
 
     info!("Lorekeeper MCP server starting on stdio...");
-    server.start().await.map_err(|e| LoreError::Internal(e.to_string()))?;
+
+    tokio::select! {
+        result = server.start() => {
+            if let Err(e) = result {
+                return Err(LoreError::Internal(e.to_string()));
+            }
+        }
+        _ = tokio::signal::ctrl_c() => {
+            info!("Lorekeeper received SIGINT — shutting down gracefully.");
+        }
+    }
 
     Ok(())
 }

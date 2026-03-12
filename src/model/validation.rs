@@ -1,6 +1,9 @@
 //! Validation logic for TARS role enforcement and schema compliance.
 
-use super::{entry::NewEntry, types::EntryType};
+use super::{
+    entry::{EntryId, NewEntry},
+    types::EntryType,
+};
 use crate::error::LoreError;
 
 /// Validates a new entry against role and type-specific rules.
@@ -9,6 +12,10 @@ use crate::error::LoreError;
 /// 1. Title is not empty.
 /// 2. Role is authorized to write this entry type.
 /// 3. Metadata schema matches the entry type.
+///
+/// # Errors
+///
+/// Returns [`LoreError`] if validation fails (empty title, wrong role, or bad schema).
 pub fn validate_new_entry(entry: &NewEntry) -> Result<(), LoreError> {
     if entry.title.trim().is_empty() {
         return Err(LoreError::Validation("title cannot be empty".to_owned()));
@@ -19,6 +26,10 @@ pub fn validate_new_entry(entry: &NewEntry) -> Result<(), LoreError> {
 }
 
 /// Validates that a role is authorized to write a specific entry type.
+///
+/// # Errors
+///
+/// Returns [`LoreError::RoleViolation`] if the role is not permitted to create the given type.
 pub fn validate_role(role: &str, entry_type: EntryType) -> Result<(), LoreError> {
     let allowed = entry_type.allowed_roles();
     if !allowed.contains(&role.to_lowercase().as_str()) {
@@ -31,6 +42,10 @@ pub fn validate_role(role: &str, entry_type: EntryType) -> Result<(), LoreError>
 }
 
 /// Validates the JSON metadata for an entry against its specific Rust type.
+///
+/// # Errors
+///
+/// Returns [`LoreError`] if the `data` field cannot be deserialized into the expected schema.
 pub fn validate_update(
     entry_type: EntryType,
     data: Option<&serde_json::Value>,
@@ -78,6 +93,68 @@ pub fn validate_update(
     Ok(())
 }
 
+/// Validates that a state transition in the `data.status` field is legal.
+///
+/// State machine rules:
+/// - PLAN: `planned` -> `executed` | `planned` -> `abandoned` (no revert allowed)
+/// - STUB: `open` -> `resolved` (no revert allowed)
+///
+/// If either value is `None` the check is skipped.
+///
+/// # Errors
+///
+/// Returns [`LoreError::Validation`] when the transition is illegal.
+pub fn validate_state_transition(
+    entry_type: EntryType,
+    current_status: Option<&str>,
+    new_status: Option<&str>,
+) -> Result<(), LoreError> {
+    let (Some(current), Some(next)) = (current_status, new_status) else {
+        return Ok(());
+    };
+    if current == next {
+        return Ok(());
+    }
+
+    match entry_type {
+        EntryType::Plan => {
+            let valid = matches!((current, next), ("planned", "executed" | "abandoned"));
+            if !valid {
+                return Err(LoreError::Validation(format!(
+                    "PLAN state transition `{current}` -> `{next}` is not permitted; \
+                     allowed: planned->executed, planned->abandoned"
+                )));
+            }
+        }
+        EntryType::Stub => {
+            let valid = matches!((current, next), ("open", "resolved"));
+            if !valid {
+                return Err(LoreError::Validation(format!(
+                    "STUB state transition `{current}` -> `{next}` is not permitted; \
+                     allowed: open->resolved"
+                )));
+            }
+        }
+        _ => {} // No state machine for other types
+    }
+
+    Ok(())
+}
+
+/// Validates that all entries in `related_entries` are valid UUIDs.
+///
+/// # Errors
+///
+/// Returns [`LoreError::Validation`] if any string is not a well-formed UUID.
+pub fn validate_related_entries(ids: &[EntryId]) -> Result<(), LoreError> {
+    for entry_id in ids {
+        uuid::Uuid::parse_str(&entry_id.0).map_err(|_| {
+            LoreError::Validation(format!("related_entry `{}` is not a valid UUID", entry_id.0))
+        })?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::panic, clippy::str_to_string)]
@@ -105,7 +182,7 @@ mod tests {
     #[test]
     fn validate_new_entry_missing_title() {
         let mut entry = create_test_entry(EntryType::Decision, None);
-        entry.title = String::new(); // Empty title should fail
+        entry.title = String::new();
         let result = validate_new_entry(&entry);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), LoreError::Validation(_)));
@@ -197,5 +274,64 @@ mod tests {
                 "Expected Ok for {entry_type:?} with role {role}, got: {result:?}"
             );
         }
+    }
+
+    // ---- State machine tests -------------------------------------------------
+
+    #[test]
+    fn plan_transition_planned_to_executed_is_valid() {
+        assert!(
+            validate_state_transition(EntryType::Plan, Some("planned"), Some("executed")).is_ok()
+        );
+    }
+
+    #[test]
+    fn plan_transition_planned_to_abandoned_is_valid() {
+        assert!(
+            validate_state_transition(EntryType::Plan, Some("planned"), Some("abandoned")).is_ok()
+        );
+    }
+
+    #[test]
+    fn plan_transition_executed_to_planned_is_invalid() {
+        let result = validate_state_transition(EntryType::Plan, Some("executed"), Some("planned"));
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), LoreError::Validation(_)));
+    }
+
+    #[test]
+    fn stub_transition_open_to_resolved_is_valid() {
+        assert!(validate_state_transition(EntryType::Stub, Some("open"), Some("resolved")).is_ok());
+    }
+
+    #[test]
+    fn stub_transition_resolved_to_open_is_invalid() {
+        let result = validate_state_transition(EntryType::Stub, Some("resolved"), Some("open"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn state_transition_skipped_when_status_none() {
+        assert!(validate_state_transition(EntryType::Plan, None, Some("executed")).is_ok());
+        assert!(validate_state_transition(EntryType::Plan, Some("planned"), None).is_ok());
+    }
+
+    // ---- UUID validation tests -----------------------------------------------
+
+    #[test]
+    fn related_entries_valid_uuids_passes() {
+        let ids = vec![
+            EntryId("01957ab6-0000-7000-b000-000000000001".to_string()),
+            EntryId("01957ab6-0000-7000-b000-000000000002".to_string()),
+        ];
+        assert!(validate_related_entries(&ids).is_ok());
+    }
+
+    #[test]
+    fn related_entries_invalid_uuid_fails() {
+        let ids = vec![EntryId("not-a-uuid".to_string())];
+        let result = validate_related_entries(&ids);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), LoreError::Validation(_)));
     }
 }

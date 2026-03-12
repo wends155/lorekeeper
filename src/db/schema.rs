@@ -66,6 +66,10 @@ CREATE TABLE IF NOT EXISTS schema_version (
 ";
 
 /// Initializes the database schema and performs migrations.
+///
+/// # Errors
+///
+/// Returns [`LoreError`] if any SQL execution fails.
 pub fn init_schema(conn: &Connection) -> Result<(), LoreError> {
     let tx = conn.unchecked_transaction()?;
 

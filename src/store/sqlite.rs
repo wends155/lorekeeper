@@ -3,7 +3,9 @@
 use crate::error::LoreError;
 use crate::model::entry::{Entry, NewEntry, UpdateEntry};
 use crate::model::types::EntryType;
-use crate::model::validation::validate_new_entry;
+use crate::model::validation::{
+    validate_new_entry, validate_related_entries, validate_state_transition,
+};
 use crate::store::repository::{EntryRepository, Filters, MemoryStats, SearchQuery};
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, Row, params};
@@ -36,6 +38,9 @@ impl EntryRepository for SqliteEntryRepo {
         // Validation
         input.normalize_tags();
         validate_new_entry(&input)?;
+        if let Some(related) = &input.related_entries {
+            validate_related_entries(related)?;
+        }
 
         let id = Uuid::now_v7().to_string();
         let now = Utc::now();
@@ -116,6 +121,12 @@ impl EntryRepository for SqliteEntryRepo {
             return Err(LoreError::NotFound(id.to_owned()));
         }
 
+        // Validate state transition for stateful types (PLAN, STUB)
+        let current_status = existing.data.get("status").and_then(|v| v.as_str());
+        let new_status =
+            update.data.as_ref().and_then(|d| d.get("status")).and_then(|v| v.as_str());
+        validate_state_transition(existing.entry_type, current_status, new_status)?;
+
         update.normalize_tags();
         let now = Utc::now();
 
@@ -123,6 +134,7 @@ impl EntryRepository for SqliteEntryRepo {
         let body = update.body.or(existing.body);
         let tags = update.tags.unwrap_or(existing.tags);
         let related = update.related_entries.unwrap_or(existing.related_entries);
+        validate_related_entries(&related)?;
         let data = update.data.unwrap_or(existing.data);
 
         // Validate merged

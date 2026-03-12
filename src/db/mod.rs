@@ -22,6 +22,11 @@ impl Database {
     ///
     /// This creates parent directories if they don't exist, enables WAL mode,
     /// and initializes the schema.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LoreError`] if the directory cannot be created, the database
+    /// connection fails, or the schema initialization fails.
     pub fn open(path: &Path) -> Result<Self, LoreError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -39,6 +44,10 @@ impl Database {
     /// Opens an in-memory `SQLite` database connection.
     ///
     /// Useful for testing. Initializes the schema.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LoreError`] if the connection or schema initialization fails.
     pub fn open_in_memory() -> Result<Self, LoreError> {
         let conn = Connection::open_in_memory()?;
         // Even for in-memory, setting WAL won't hurt, though it might stay 'memory'
