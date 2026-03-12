@@ -40,6 +40,7 @@ Extract from the step header:
 2. Locate the function/struct/module referenced in the step
 3. Understand the current state — does it match the plan's Pre-condition?
 4. If the Pre-condition does not hold → **STOP**, do not proceed
+5. **Cross-reference the plan's Interface Contracts section** — if the step implements a struct, function, or field listed there, the signature, visibility, and field access patterns are Priority 2 (non-negotiable). Match them exactly or STOP.
 
 ### 2.3 Execute
 
@@ -152,6 +153,14 @@ After writing code for any step:
 If the re-read reveals a mismatch:
 - Fix the code **before** running Post checks
 - Do not rationalize deviations — match the plan or STOP
+
+> [!IMPORTANT]
+> **Final Pipeline Rule (RC-1 Prevention):** Before running `git commit` at any checkpoint,
+> the Builder MUST run the **full** verification pipeline:
+> ```sh
+> cargo fmt --all -- --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test --all-features
+> ```
+> No code edits are permitted after the final pipeline pass. If a fix is needed, re-run the entire pipeline from the start.
 
 ## 7. Builder Notes
 

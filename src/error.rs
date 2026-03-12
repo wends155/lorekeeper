@@ -1,5 +1,3 @@
-
-
 #[derive(Debug, thiserror::Error)]
 pub enum LoreError {
     #[error("database error: {0}")]

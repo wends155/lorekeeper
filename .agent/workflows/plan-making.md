@@ -91,6 +91,12 @@ Generate `task.md` from the plan:
 > [!WARNING]
 > task.md must be aligned with the plan before requesting approval.
 
+> [!IMPORTANT]
+> **Test Granularity Rule (RC-2 Prevention):** Each individually named test function in the plan's
+> Test Plan table must appear as its own `- [ ]` sub-item within the corresponding `[TEST]` entry
+> in task.md. A single `[TEST] filename — unit tests` checkbox is **not** sufficient if the Test
+> Plan enumerates multiple named tests. The Builder checks off each test individually.
+
 ### 4. Self-Review Checklist
 
 Before requesting approval, verify each item. Items marked 🤖 can be verified
@@ -103,6 +109,8 @@ with Narsil MCP or scripts; items marked 🧠 require LLM judgment.
 - [ ] 🧠 Interface contracts specified (signatures, invariants, error conditions)
 - [ ] 🧠 Cross-module handshakes documented (caller/callee, data format, error propagation)
 - [ ] 🧠 Code snippets included for non-trivial changes
+- [ ] 🧠 Steps implementing non-trivial logic (>1 branch or algorithm) include inline pseudocode **or** an explicit `See architecture.md §X` cross-reference — vague descriptions like "walk-up discovery" without the algorithm are not acceptable (RC-3 Prevention)
+- [ ] 🧠 If `coding-standard.md §4.5` requires doc comments on public items, plan includes doc-writing steps **or** explicitly lists docs as deferred in the Out-of-Scope section (RC-5 Prevention)
 
 **Compliance** (cross-reference each proposed change against these rules):
 

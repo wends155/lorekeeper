@@ -6,10 +6,15 @@ use std::path::Path;
 
 #[derive(Debug)]
 pub struct Database {
-    pub conn: Connection,
+    conn: Connection,
 }
 
 impl Database {
+    /// Returns a reference to the underlying `SQLite` connection.
+    pub const fn connection(&self) -> &Connection {
+        &self.conn
+    }
+
     pub fn open(path: &Path) -> Result<Self, LoreError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -46,7 +51,7 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         // Check if table exists
         let count: i64 = db
-            .conn
+            .connection()
             .query_row(
                 "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='entry'",
                 [],
@@ -60,7 +65,7 @@ mod tests {
     fn test_fts_table_exists() {
         let db = Database::open_in_memory().unwrap();
         let count: i64 = db
-            .conn
+            .connection()
             .query_row(
                 "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='entry_fts'",
                 [],
@@ -74,7 +79,7 @@ mod tests {
     fn test_schema_version_initialized() {
         let db = Database::open_in_memory().unwrap();
         let version: i32 = db
-            .conn
+            .connection()
             .query_row(
                 "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1",
                 [],
@@ -87,7 +92,8 @@ mod tests {
     #[test]
     fn test_wal_mode_enabled() {
         let db = Database::open_in_memory().unwrap();
-        let mode: String = db.conn.query_row("PRAGMA journal_mode", [], |row| row.get(0)).unwrap();
+        let mode: String =
+            db.connection().query_row("PRAGMA journal_mode", [], |row| row.get(0)).unwrap();
         // In-memory format typically uses 'memory' journal mode, but we requested WAL.
         // Actually SQLite ignores WAL for purely in-memory databases (:memory:),
         // but it accepts the pragma. So the result might be 'memory'.

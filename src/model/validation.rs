@@ -138,4 +138,54 @@ mod tests {
         entry.normalize_tags();
         assert_eq!(entry.tags.unwrap(), vec!["rust", "mcp"]);
     }
+
+    #[test]
+    fn validate_new_entry_all_types_happy_path() {
+        use serde_json::json;
+
+        let cases: &[(EntryType, &str, Option<serde_json::Value>)] = &[
+            (EntryType::Decision, "architect", None),
+            (
+                EntryType::Commit,
+                "builder",
+                Some(json!({ "hash": "abc123", "files": ["src/main.rs"] })),
+            ),
+            (EntryType::Constraint, "architect", Some(json!({ "source": "legal" }))),
+            (EntryType::Lesson, "architect", Some(json!({ "root_cause": "misconfig" }))),
+            (
+                EntryType::Plan,
+                "architect",
+                Some(json!({ "scope": "module", "tier": "S", "status": "draft" })),
+            ),
+            (EntryType::Feature, "architect", Some(json!({ "status": "proposed" }))),
+            (
+                EntryType::Stub,
+                "builder",
+                Some(
+                    json!({ "phase_number": 2, "contract": "trait X", "module": "store", "status": "pending" }),
+                ),
+            ),
+            (
+                EntryType::Deferred,
+                "architect",
+                Some(json!({ "reason": "out of scope", "target_phase": 2 })),
+            ),
+            (
+                EntryType::BuilderNote,
+                "builder",
+                Some(json!({ "note_type": "observation", "step_ref": "5", "plan_ref": "plan-v1" })),
+            ),
+            (EntryType::TechDebt, "builder", Some(json!({ "severity": "low", "origin_phase": 1 }))),
+        ];
+
+        for (entry_type, role, data) in cases {
+            let mut entry = create_test_entry(*entry_type, data.clone());
+            entry.role = (*role).to_string();
+            let result = validate_new_entry(&entry);
+            assert!(
+                result.is_ok(),
+                "Expected Ok for {entry_type:?} with role {role}, got: {result:?}"
+            );
+        }
+    }
 }
