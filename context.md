@@ -14,6 +14,35 @@
   - Deferred Integration Tests and Graceful Shutdown to a future phase to focus on immediate remediation items.
   - Used `SQLite` (with backticks) in documentation to satisfy `clippy::doc_markdown`.
 
+### 2026-03-13: Phases 1–5 + Audit Remediation (Completion)
+- **Objective:** Implement LLM Help System (Phase 1), Spec Compliance (Phase 2), Graceful Shutdown (Phase 4B), Documentation Polish (Phase 5), then perform full audit and remediate findings.
+- **Phase 1 — LLM Help System:**
+  - Renamed all MCP tools to `lorekeeper_*` prefix.
+  - Added rich Markdown descriptions + JSON Schema to every tool for LLM clarity.
+  - Added `lorekeeper_help` (meta-tool for topic-based help) and `lorekeeper_render`.
+  - Wrote comprehensive `server.instructions` prompt in `main.rs` teaching agents when/how to use each tool.
+  - Added `#[instrument]` tracing to all handlers.
+- **Phase 2 — Spec Compliance:**
+  - `validate_state_transition()`: Enforces PLAN (`planned`→`executed`|`abandoned`) and STUB (`open`→`resolved`) state machines. Rejects illegal reverts.
+  - `validate_related_entries()`: Validates that every `related_entries` ID is a well-formed UUID v4/v7.
+  - Both wired into `SqliteEntryRepo::store()` and `update()`.
+- **Phase 4B — Graceful Shutdown:** `tokio::select!` + `ctrl_c()` in `main.rs`.
+- **Phase 5 — Documentation Polish:** Removed `#![allow(clippy::missing_errors_doc)]`; added `# Errors` doc sections to 15 public `Result`-returning functions.
+- **Audit Findings Remediated:**
+  1. `src/lib.rs` — removed stale blank lines (fmt check now passes).
+  2. `architecture.md` directory tree — removed non-existent `handlers.rs` and `tests/` subtree.
+  3. `architecture.md` MCP Tool Reference — renamed `memory_*` → `lorekeeper_*`, updated count 8→11, added `lorekeeper_render` and `lorekeeper_help`.
+  4. `src/store/sqlite.rs` — added `update_rejects_invalid_plan_transition` and `store_rejects_invalid_related_entry_uuid` integration tests.
+  5. `src/model/entry.rs` — derived `Default` for `UpdateEntry`.
+- **Verification:** `cargo fmt --all` ✅  `cargo clippy -D warnings` ✅  `cargo test` ✅ 38/38 passed.
+- **Commits:**
+  - `feat(phase-1): LLM help system — lorekeeper_* rename, rich descriptions, help tool, render tool, tracing`
+  - `feat(phases-2-5): state machine, UUID validation, graceful shutdown, # Errors docs`
+  - `fix(audit): remediate stale docs, fmt, and add integration tests`
+- **Decisions:**
+  - Kept `#[allow(clippy::too_many_lines)]` on `main()` — acceptable for MCP bootstrap setup.
+  - Phase 3 (integration test suite with `mockall`) remains deferred — unit + sqlite integration coverage is sufficient for now.
+
 ## Technical Context
 - **Toolchain:** Rust (Stable), Windows (pwsh).
 - **Core Dependencies:** `rusqlite`, `chrono`, `serde`, `uuid`, `rust-mcp-sdk`.

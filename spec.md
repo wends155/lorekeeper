@@ -83,9 +83,9 @@ stateDiagram-v2
 
 | From | To | Trigger | Side Effects |
 |------|----|---------|--------------|
-| — | PLANNED | `memory_store(type="PLAN")` | Entry inserted |
-| PLANNED | EXECUTED | `memory_update()` | `updated_at` refreshed |
-| PLANNED | ABANDONED | `memory_update()` | `updated_at` refreshed |
+| — | PLANNED | `lorekeeper_store(type="PLAN")` | Entry inserted |
+| PLANNED | EXECUTED | `lorekeeper_update()` | `updated_at` refreshed |
+| PLANNED | ABANDONED | `lorekeeper_update()` | `updated_at` refreshed |
 | EXECUTED | PLANNED | INVALID | Cannot revert execution |
 
 ### `StubStatus`
@@ -99,8 +99,8 @@ stateDiagram-v2
 
 | From | To | Trigger | Side Effects |
 |------|----|---------|--------------|
-| — | OPEN | `memory_store(type="STUB")` | Expected phase registered |
-| OPEN | RESOLVED | `memory_update()` | `updated_at` refreshed |
+| — | OPEN | `lorekeeper_store(type="STUB")` | Expected phase registered |
+| OPEN | RESOLVED | `lorekeeper_update()` | `updated_at` refreshed |
 
 ---
 
@@ -174,25 +174,27 @@ THEN the deleted entry is not included in the results
 
 | Tool Name | Parameters | Returns Format |
 |-----------|------------|----------------|
-| `memory_store` | `type`, `role`, `title`, `body?`, `tags?`, `related_entries?`, `data?` | JSON String (Serialized `Entry`) |
-| `memory_update`| `id`, `role`, `title?`, `body?`, `tags?`, `related_entries?`, `data?` | JSON String (Serialized `Entry`) |
-| `memory_delete`| `id`, `role` | Boolean (`true`) |
-| `memory_render`| `format?` (markdown standard) | Markdown Text |
-| `memory_search`| `query`, `type?`, `limit?` | JSON String (Array of `Entry`) |
-| `memory_recent`| `limit?` | JSON String (Array of `Entry`) |
-| `memory_by_type`| `type`, `status?`, `limit?`, `offset?` | JSON String (Array of `Entry`) |
-| `memory_stats` | (none) | JSON String (Type counts, staleness metrics) |
+| `lorekeeper_store` | `entry_type`, `role`, `title`, `body?`, `tags?`, `related_entries?`, `data?` | JSON Object `{ status: success, id: uuid }` |
+| `lorekeeper_update` | `id`, `title?`, `body?`, `tags?`, `related_entries?`, `data?` | JSON Object (Serialized `Entry`) |
+| `lorekeeper_delete` | `id` | JSON Object `{ status: success }` |
+| `lorekeeper_render` | `format?` (markdown, default) | Markdown Text |
+| `lorekeeper_get` | `id` | JSON Object (Serialized `Entry`) |
+| `lorekeeper_search` | `query`, `entry_type?`, `limit?` | JSON Array of `Entry` |
+| `lorekeeper_recent` | `limit?` | JSON Array of `Entry` |
+| `lorekeeper_by_type` | `entry_type`, `status?`, `limit?`, `offset?` | JSON Array of `Entry` |
+| `lorekeeper_stats` | (none) | JSON Object (type counts, last_updated) |
+| `lorekeeper_help` | `topic?` | Markdown help text |
 
 ### Behavioral Scenarios
 
 [HAPPY] Successful tool invocation
-GIVEN a valid JSON-RPC 2.0 request to `memory_recent`
+GIVEN a valid JSON-RPC 2.0 request to `lorekeeper_recent`
 WHEN the server processes the request
 THEN a valid JSON-RPC response is returned over stdout
 AND the result contains the serialized `Vec<Entry>`
 
 [ERROR] Request validation failure maps to Invalid Params
-GIVEN an MCP tool call to `memory_store` that fails domain validation (e.g. missing title)
+GIVEN an MCP tool call to `lorekeeper_store` that fails domain validation (e.g. missing title)
 WHEN the server processes the request
 THEN a JSON-RPC error response is returned
 AND the error code is `-32602` (Invalid Params)

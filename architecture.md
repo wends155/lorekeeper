@@ -288,12 +288,12 @@ Default: `info`. Parsed by `EnvFilter` at startup.
 
 ### Integration Tests
 
-- **Location:** `tests/` directory at crate root.
+- **Location:** Co-located `#[cfg(test)] mod tests` within each source module (no separate `tests/` directory).
 - **Scope:**
-  - `store_tests.rs` — full CRUD + search + pagination against temp SQLite file.
-  - `validation_tests.rs` — all 10 entry types × valid/invalid inputs.
-  - `server_tests.rs` — MCP tool handlers with mocked repository.
-- **Fixtures:** `tests/common/mod.rs` provides `setup_test_db()` helper.
+  - `store/sqlite.rs` — full CRUD + search + pagination + state machine + UUID validation against in-memory SQLite.
+  - `model/validation.rs` — all 10 entry types × valid/invalid inputs, role enforcement, state transitions.
+  - `main.rs` — `find_project_root()` discovery logic with tempdir fixtures.
+- **Repository mock:** `EntryRepository` trait is annotated with `#[cfg_attr(test, mockall::automock)]` for isolated handler tests.
 
 ### Coverage Expectations
 
