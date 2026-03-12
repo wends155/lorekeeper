@@ -418,6 +418,141 @@ impl LoreHandler {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::entry::{Entry, EntryId};
+    use crate::store::repository::MockEntryRepository;
+    use crate::error::LoreError;
+    use chrono::Utc;
+    use serde_json::json;
+
+    fn test_entry(id: &str) -> Entry {
+        Entry {
+            id: EntryId(id.into()),
+            entry_type: EntryType::Decision,
+            title: "Test Entry".into(),
+            body: None,
+            role: "architect".into(),
+            tags: vec![],
+            related_entries: vec![],
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            is_deleted: false,
+            data: serde_json::Value::Null,
+        }
+    }
+
+    fn to_map(val: Value) -> serde_json::Map<String, Value> {
+        match val {
+            Value::Object(map) => map,
+            _ => serde_json::Map::new(),
+        }
+    }
+
+    #[test]
+    fn handle_store_success() {
+        let mut mock = MockEntryRepository::new();
+        mock.expect_store().times(1).returning(|_| Ok(test_entry("uuid1")));
+
+        let handler = LoreHandler::new(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "lorekeeper_store".to_owned(),
+            arguments: Some(to_map(json!({
+                "entry_type": "DECISION",
+                "role": "architect",
+                "title": "New Decision"
+            }))),
+            meta: None,
+            task: None,
+        };
+
+        let result = handler.handle_tool_call(params).unwrap();
+        assert_eq!(result["status"], "success");
+        assert_eq!(result["id"], "uuid1");
+    }
+
+    #[test]
+    fn handle_store_validation_error() {
+        let mut mock = MockEntryRepository::new();
+        mock.expect_store()
+            .times(1)
+            .returning(|_| Err(LoreError::Validation("missing title".into())));
+
+        let handler = LoreHandler::new(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "lorekeeper_store".to_owned(),
+            arguments: Some(to_map(json!({
+                "entry_type": "DECISION",
+                "role": "architect",
+                "title": ""
+            }))),
+            meta: None,
+            task: None,
+        };
+
+        let result = handler.handle_tool_call(params);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing title"));
+    }
+
+    #[test]
+    fn handle_get_success() {
+        let mut mock = MockEntryRepository::new();
+        mock.expect_get().times(1).returning(|id| {
+            if id == "id1" { Ok(test_entry("id1")) } else { Err(LoreError::NotFound(id.into())) }
+        });
+
+        let handler = LoreHandler::new(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "lorekeeper_get".to_owned(),
+            arguments: Some(to_map(json!({ "id": "id1" }))),
+            meta: None,
+            task: None,
+        };
+
+        let result = handler.handle_tool_call(params).unwrap();
+        assert_eq!(result["id"], "id1");
+        assert_eq!(result["title"], "Test Entry");
+    }
+
+    #[test]
+    fn handle_get_not_found() {
+        let mut mock = MockEntryRepository::new();
+        mock.expect_get()
+            .times(1)
+            .returning(|id| Err(LoreError::NotFound(id.into())));
+
+        let handler = LoreHandler::new(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "lorekeeper_get".to_owned(),
+            arguments: Some(to_map(json!({ "id": "missing" }))),
+            meta: None,
+            task: None,
+        };
+
+        let result = handler.handle_tool_call(params);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found: missing"));
+    }
+
+    #[test]
+    fn handle_unknown_tool() {
+        let mock = MockEntryRepository::new();
+        let handler = LoreHandler::new(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "unknown_tool".to_owned(),
+            arguments: None,
+            meta: None,
+            task: None,
+        };
+
+        let result = handler.handle_tool_call(params);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unknown tool: unknown_tool"));
+    }
+}
+
 #[async_trait]
 impl ServerHandlerCore for LoreHandler {
     async fn handle_request(
