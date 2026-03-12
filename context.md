@@ -48,3 +48,21 @@
 - **Core Dependencies:** `rusqlite`, `chrono`, `serde`, `uuid`, `rust-mcp-sdk`.
 - **Database:** SQLite with FTS5 virtual tables for searching.
 - **Server:** MCP protocol using `rust-mcp-sdk`.
+- **File Structure:** `server/mod.rs` (~480 lines, down from 590) + `server/help.rs` (help text module).
+
+### 2026-03-13: Remaining Tech Debt Remediation
+- **Phase 0:** Updated `.gemini/antigravity/mcp_config.json` to add `lorekeeper` to Narsil `--repos` args. Requires session restart to activate.
+- **Phase A:** Confirmed `lorekeeper_get` already fully implemented (registered, dispatched, described). Synced `spec.md` — all `memory_*` names replaced with `lorekeeper_*`, added `lorekeeper_get/render/help` rows. Synced `architecture.md` — removed phantom `tests/` references, documented actual co-located test strategy.
+- **Phase B:** Added 4 unit tests for `find_project_root()` in `main.rs` using `tempfile` (already in dev-deps). `#[allow(clippy::expect_used)]` added to test module.
+- **Phase C:** Extracted 108 lines of help text from `server/mod.rs` into `server/help.rs` submodule. Used `pub(super)` visibility to satisfy both `unreachable_pub` and `redundant_pub_crate` lints. `mod.rs` reduced from 590→~480 lines.
+- **Phase D:** Extended `MemoryStats` with `by_status: Vec<(String, u64)>` field. Added SQL `json_extract(data, '$.status')` query in `stats()`. Added `stats_returns_status_breakdown` integration test.
+- **Verification:** `cargo fmt --check` ✅ `cargo clippy -D warnings` ✅ `cargo test` ✅ **43/43 passed** (+5 new tests).
+- **Commits:**
+  - `e74c40f docs(phase-a): sync spec.md and architecture.md with lorekeeper_* names and testing reality`
+  - `d942a5c test(phase-b): add find_project_root unit tests`
+  - `da2cf5a refactor(phase-c): extract server/help.rs to reduce mod.rs line count`
+  - `748a115 feat(phase-d): add MemoryStats.by_status with per-status entry counts`
+- **Decisions:**
+  - `pub(super)` is the correct visibility for functions in private submodules — satisfies both the `unreachable_pub` and `redundant_pub_crate` clippy lints.
+  - `lorekeeper_get` was already implemented from Phase 1 — Phase A confirmed and documented rather than re-implemented.
+  - No remaining tech debt items. All deferred items from `context.md` resolved.
