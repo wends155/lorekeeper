@@ -175,3 +175,41 @@ fn find_project_root(start: &std::path::Path) -> Option<PathBuf> {
     }
     None
 }
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::find_project_root;
+    use std::fs;
+
+    #[test]
+    fn find_project_root_via_git() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir(tmp.path().join(".git")).expect("create .git");
+        assert_eq!(find_project_root(tmp.path()), Some(tmp.path().to_path_buf()));
+    }
+
+    #[test]
+    fn find_project_root_via_lorekeeper_dir() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // Both markers exist — .lorekeeper (Pass 1) must win over .git (Pass 2)
+        fs::create_dir(tmp.path().join(".lorekeeper")).expect("create .lorekeeper");
+        fs::create_dir(tmp.path().join(".git")).expect("create .git");
+        assert_eq!(find_project_root(tmp.path()), Some(tmp.path().to_path_buf()));
+    }
+
+    #[test]
+    fn find_project_root_returns_none_when_no_markers() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        assert_eq!(find_project_root(tmp.path()), None);
+    }
+
+    #[test]
+    fn find_project_root_walks_up_to_git() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir(tmp.path().join(".git")).expect("create .git");
+        let nested = tmp.path().join("a").join("b").join("c");
+        fs::create_dir_all(&nested).expect("create nested dirs");
+        assert_eq!(find_project_root(&nested), Some(tmp.path().to_path_buf()));
+    }
+}
