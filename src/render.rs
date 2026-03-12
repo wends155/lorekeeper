@@ -38,6 +38,13 @@ pub fn render_entries(entries: &[Entry]) -> String {
             if !entry.tags.is_empty() {
                 let _ = writeln!(output, "- **Tags:** {}", entry.tags.join(", "));
             }
+            if !entry.data.is_null() {
+                let _ = writeln!(
+                    output,
+                    "- **Data:**\n```json\n{}\n```",
+                    serde_json::to_string_pretty(&entry.data).unwrap_or_default()
+                );
+            }
             output.push('\n');
             if let Some(body) = &entry.body {
                 output.push_str(body);
@@ -97,5 +104,20 @@ mod tests {
         let result = render_entries(&entries);
         assert!(result.contains("## DECISION"));
         assert!(result.contains("## COMMIT"));
+    }
+
+    #[test]
+    fn render_entry_with_data() {
+        let mut entry = test_entry("id1", EntryType::Plan, "Title 1", 0);
+        entry.data = serde_json::json!({
+            "status": "planned",
+            "scope": "test",
+            "tier": "S"
+        });
+        let entries = vec![entry];
+        let result = render_entries(&entries);
+        assert!(result.contains("- **Data:**"));
+        assert!(result.contains("\"status\": \"planned\""));
+        assert!(result.contains("```json"));
     }
 }
