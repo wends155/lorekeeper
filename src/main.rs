@@ -74,10 +74,41 @@ async fn main() -> Result<(), LoreError> {
             tasks: None,
         },
         instructions: Some(
-            "Lorekeeper: Structured agent memory bank. \
-             Use lore_store to save decisions, constraints, lessons, plans, etc. \
-             Use lore_search, lore_get, lore_recent, lore_by_type to retrieve. \
-             Use lore_stats for an overview."
+            "Lorekeeper is your persistent structured memory bank for the TARS workflow. \
+             It survives across sessions and context resets.\n\
+             \n\
+             SESSION START:\n\
+             1. Call lorekeeper_stats to see the current state of the memory bank.\n\
+             2. Call lorekeeper_recent to load recent context (last 10 entries).\n\
+             3. Before making decisions, call lorekeeper_search to check for prior decisions and constraints.\n\
+             \n\
+             DURING WORK:\n\
+             - Architectural decision made → lorekeeper_store with type DECISION (architect role)\n\
+             - Git commit completed → lorekeeper_store with type COMMIT (builder role)\n\
+             - Constraint discovered → lorekeeper_store with type CONSTRAINT (architect role)\n\
+             - Lesson learned from a bug → lorekeeper_store with type LESSON (architect role)\n\
+             - Plan created → lorekeeper_store with type PLAN (architect role)\n\
+             - Work deferred → lorekeeper_store with type DEFERRED (either role)\n\
+             - Technical debt noted → lorekeeper_store with type TECH_DEBT (either role)\n\
+             - Stub registered → lorekeeper_store with type STUB (builder role)\n\
+             \n\
+             SESSION END:\n\
+             - Update PLAN entries: set status to executed or abandoned via lorekeeper_update.\n\
+             - Resolve completed STUBs: set status to resolved via lorekeeper_update.\n\
+             - Call lorekeeper_render to produce a human-readable memory dump if requested.\n\
+             \n\
+             ROLE ENFORCEMENT:\n\
+             Your role field must match your current TARS phase.\n\
+             - architect (Think/Reflect phases): DECISION, CONSTRAINT, LESSON, PLAN, FEATURE\n\
+             - builder (Act phase): COMMIT, STUB, BUILDER_NOTE\n\
+             - both roles: DEFERRED, TECH_DEBT\n\
+             \n\
+             TAGGING BEST PRACTICES:\n\
+             - Use lowercase, descriptive tags: [auth, database, phase-2, breaking-change]\n\
+             - Tags are full-text searchable via lorekeeper_search.\n\
+             - Link related entries using related_entries UUIDs.\n\
+             \n\
+             Call lorekeeper_help with a topic for detailed guidance on any entry type or tool."
                 .into(),
         ),
         meta: None,

@@ -1,7 +1,12 @@
 //! MCP server handler implementation.
+//!
+//! This module wires up the [`LoreHandler`] as the MCP server's request handler,
+//! registering all Lorekeeper tools and dispatching incoming tool calls to the
+//! appropriate repository methods.
 
 use crate::model::entry::{NewEntry, UpdateEntry};
 use crate::model::types::EntryType;
+use crate::render::render_entries;
 use crate::store::repository::{EntryRepository, Filters, SearchQuery};
 use async_trait::async_trait;
 use rust_mcp_sdk::McpServer;
@@ -13,6 +18,220 @@ use rust_mcp_sdk::schema::{
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tracing::{error, info, warn};
+
+// ---- Tool description strings -----------------------------------------------
+// Stored as named `&str` constants so rustfmt does not reformat the interior of
+// json!() macro calls, which would break the HashMap::from([...]) structure.
+
+const DESC_STORE: &str = "Store a new memory entry in the Lorekeeper database.\n\n\
+    WHEN TO USE:\n\
+    - After making an architectural decision -> type DECISION\n\
+    - After completing a git commit -> type COMMIT\n\
+    - When discovering a project constraint -> type CONSTRAINT\n\
+    - When learning from a bug or incident -> type LESSON\n\
+    - When creating an implementation plan -> type PLAN\n\
+    - When defining a new feature -> type FEATURE\n\
+    - When registering a stub for future work -> type STUB\n\
+    - When deferring work to a later phase -> type DEFERRED\n\
+    - When recording implementation observations -> type BUILDER_NOTE\n\
+    - When flagging technical debt -> type TECH_DEBT\n\n\
+    ROLE ENFORCEMENT:\n\
+    - Architect-only: DECISION, CONSTRAINT, LESSON, PLAN, FEATURE\n\
+    - Builder-only: COMMIT, STUB, BUILDER_NOTE\n\
+    - Both roles: DEFERRED, TECH_DEBT\n\n\
+    DATA SCHEMA (required fields by type):\n\
+    - COMMIT: { hash: <git-hash>, files: [path/to/file] }\n\
+    - CONSTRAINT: { source: <origin> }\n\
+    - LESSON: { root_cause: <explanation> }\n\
+    - PLAN: { scope: <area>, tier: S|M|L, status: planned }\n\
+    - FEATURE: { status: <status> }\n\
+    - STUB: { phase_number: N, contract: <desc>, module: <mod>, status: open }\n\
+    - DEFERRED: { reason: <why>, target_phase: N }\n\
+    - BUILDER_NOTE: { note_type: <type>, step_ref: <step>, plan_ref: <id> }\n\
+    - TECH_DEBT: { severity: low|medium|high, origin_phase: N }\n\
+    - DECISION: no data object required\n\n\
+    RETURNS: { status: success, id: <uuid> }";
+
+const DESC_UPDATE: &str = "Update fields on an existing memory entry. Only provided fields change; \
+    omitted fields keep their current values.\n\n\
+    WHEN TO USE:\n\
+    - To mark a PLAN as executed or abandoned\n\
+    - To resolve a STUB after implementing it\n\
+    - To add tags or related entries to an existing record\n\
+    - To correct or enrich the body of a previous entry\n\n\
+    STATE TRANSITIONS (enforced server-side):\n\
+    - PLAN status: planned -> executed | planned -> abandoned (no revert)\n\
+    - STUB status: open -> resolved (no revert)\n\n\
+    RETURNS: Full updated Entry JSON object.";
+
+const DESC_DELETE: &str = "Soft-delete a memory entry. The entry is hidden from searches but preserved in the database.\n\n\
+    WHEN TO USE:\n\
+    - When an entry was created in error\n\
+    - When a decision has been superseded (prefer updating over deleting)\n\n\
+    RETURNS: { status: success }";
+
+const DESC_RENDER: &str = "Render all memory entries as a formatted Markdown document, grouped by type.\n\n\
+    WHEN TO USE:\n\
+    - When the user asks for a full memory dump\n\
+    - When generating a human-readable summary of all stored knowledge\n\
+    - For periodic review of the complete memory bank\n\n\
+    RETURNS: Markdown string with entries grouped by type, sorted chronologically.";
+
+const DESC_SEARCH: &str = "Search memory entries using full-text search across titles, bodies, and tags.\n\n\
+    WHEN TO USE:\n\
+    - At session start to recall past decisions, constraints, or lessons\n\
+    - Before making a decision, to check if a similar one already exists\n\
+    - When you need context about a specific topic or keyword\n\
+    - When starting a new task, to find relevant constraints and prior art\n\n\
+    RETURNS: JSON array of matching Entry objects, ranked by relevance.";
+
+const DESC_GET: &str = "Retrieve a specific memory entry by its UUID.\n\n\
+    WHEN TO USE:\n\
+    - When you have an entry ID from a search result or related_entries reference\n\
+    - To get the full details of a specific decision, plan, or constraint\n\n\
+    RETURNS: Full Entry JSON object with all fields.";
+
+const DESC_RECENT: &str = "List the most recently created memory entries across all types.\n\n\
+    WHEN TO USE:\n\
+    - At session start to get a quick overview of recent activity\n\
+    - To understand what was done in the last session\n\
+    - When you need broad context without a specific search query\n\n\
+    RETURNS: JSON array of Entry objects, newest first.";
+
+const DESC_BY_TYPE: &str = "List memory entries filtered by type, with optional pagination.\n\n\
+    WHEN TO USE:\n\
+    - To review all decisions made in the project\n\
+    - To list all open stubs that need implementation\n\
+    - To find all constraints before starting a new feature\n\
+    - To audit technical debt items\n\n\
+    RETURNS: JSON array of Entry objects matching the type, ordered newest first.";
+
+const DESC_STATS: &str = "Get aggregate statistics about the memory bank.\n\n\
+    WHEN TO USE:\n\
+    - At session start to understand the current state of the memory bank\n\
+    - To check how many entries of each type exist\n\
+    - To see when the last update was made\n\n\
+    RETURNS: JSON object with total count, by-type breakdown, and last_updated timestamp.";
+
+const DESC_HELP: &str = "Get contextual help about Lorekeeper tools, entry types, and workflows.\n\n\
+    WHEN TO USE:\n\
+    - When unsure which tool to use for a given situation\n\
+    - When you need the required data schema for a specific entry type\n\
+    - When you want to understand role enforcement rules\n\
+    - At the start of a session to review the workflow\n\n\
+    RETURNS: Markdown help text for the requested topic.";
+
+// ---- Help text constants ----------------------------------------------------
+
+const HELP_OVERVIEW: &str = "# Lorekeeper - Workflow Guide\n\n\
+    Lorekeeper is your persistent structured memory bank. It survives across sessions.\n\n\
+    ## Session Start\n\
+    1. Call lorekeeper_stats - see current state of the memory bank\n\
+    2. Call lorekeeper_recent - load recent context (last 10 entries)\n\
+    3. Call lorekeeper_search - check for prior decisions and constraints\n\n\
+    ## During Work\n\
+    - Decision made -> lorekeeper_store type DECISION (architect role)\n\
+    - Commit complete -> lorekeeper_store type COMMIT (builder role)\n\
+    - Constraint found -> lorekeeper_store type CONSTRAINT (architect role)\n\
+    - Lesson learned -> lorekeeper_store type LESSON (architect role)\n\
+    - Plan created -> lorekeeper_store type PLAN (architect role)\n\
+    - Work deferred -> lorekeeper_store type DEFERRED (either role)\n\
+    - Tech debt noted -> lorekeeper_store type TECH_DEBT (either role)\n\n\
+    ## Session End\n\
+    - Update PLAN status to executed or abandoned via lorekeeper_update\n\
+    - Resolve completed STUBs via lorekeeper_update\n\
+    - Optionally call lorekeeper_render for a human-readable dump";
+
+const HELP_ROLES: &str = "# Role Enforcement\n\n\
+    | Role      | Allowed Types                                      |\n\
+    |-----------|----------------------------------------------------|\n\
+    | architect | DECISION, CONSTRAINT, LESSON, PLAN, FEATURE        |\n\
+    | builder   | COMMIT, STUB, BUILDER_NOTE                         |\n\
+    | both      | DEFERRED, TECH_DEBT                                |\n\n\
+    Role violations are rejected server-side with a validation error.";
+
+const HELP_TOOLS: &str = "# Lorekeeper Tools\n\n\
+    ## Write\n\
+    - lorekeeper_store  - create new entry\n\
+    - lorekeeper_update - update existing entry\n\
+    - lorekeeper_delete - soft-delete entry\n\
+    - lorekeeper_render - export all entries as Markdown\n\n\
+    ## Read\n\
+    - lorekeeper_search  - full-text search (FTS5)\n\
+    - lorekeeper_get     - retrieve by UUID\n\
+    - lorekeeper_recent  - list newest entries\n\
+    - lorekeeper_by_type - list filtered by type\n\
+    - lorekeeper_stats   - aggregate counts\n\n\
+    ## Help\n\
+    - lorekeeper_help - this tool";
+
+const HELP_DECISION: &str = "# DECISION\n\
+    Records an architectural or technical decision.\n\
+    - Role: architect only\n\
+    - data: not required\n\
+    - Use: when committing to an approach, library, or design pattern";
+
+const HELP_COMMIT: &str = "# COMMIT\n\
+    Records a git commit with hash and changed files.\n\
+    - Role: builder only\n\
+    - data: { hash: <sha>, files: [src/main.rs] }\n\
+    - Use: after every significant git commit during Act phase";
+
+const HELP_CONSTRAINT: &str = "# CONSTRAINT\n\
+    Records a hard limit or restriction the project must respect.\n\
+    - Role: architect only\n\
+    - data: { source: <origin e.g. legal, infra, user> }\n\
+    - Use: when discovering a constraint that affects design decisions";
+
+const HELP_LESSON: &str = "# LESSON\n\
+    Records a lesson learned from a bug, incident, or failed approach.\n\
+    - Role: architect only\n\
+    - data: { root_cause: <explanation> }\n\
+    - Use: after resolving a non-trivial issue";
+
+const HELP_PLAN: &str = "# PLAN\n\
+    Records an implementation or migration plan.\n\
+    - Role: architect only\n\
+    - data: { scope: <area>, tier: S|M|L, status: planned }\n\
+    - Status transitions: planned -> executed | planned -> abandoned\n\
+    - Use: at the start of an Act phase; update to executed when complete";
+
+const HELP_FEATURE: &str = "# FEATURE\n\
+    Records a new feature or capability being designed.\n\
+    - Role: architect only\n\
+    - data: { status: <proposed|in-progress|done> }\n\
+    - Use: when defining a new capability during Think phase";
+
+const HELP_STUB: &str = "# STUB\n\
+    Registers a placeholder for incomplete functionality across phases.\n\
+    - Role: builder only\n\
+    - data: { phase_number: N, contract: <desc>, module: <mod>, status: open }\n\
+    - Status transitions: open -> resolved\n\
+    - Use: when leaving a stub; close with lorekeeper_update when implemented";
+
+const HELP_DEFERRED: &str = "# DEFERRED\n\
+    Records work explicitly deferred to a future phase.\n\
+    - Role: architect or builder\n\
+    - data: { reason: <why>, target_phase: N }\n\
+    - Use: when agreeing to defer a feature or fix";
+
+const HELP_BUILDER_NOTE: &str = "# BUILDER_NOTE\n\
+    Records an observation or suggestion during Act phase for Architect review.\n\
+    - Role: builder only\n\
+    - data: { note_type: tip|warn, step_ref: <step N>, plan_ref: <plan-id> }\n\
+    - Use: when you notice something worth flagging but outside current scope";
+
+const HELP_TECH_DEBT: &str = "# TECH_DEBT\n\
+    Records a known technical debt item for future remediation.\n\
+    - Role: architect or builder\n\
+    - data: { severity: low|medium|high, origin_phase: N }\n\
+    - Use: when introducing a deliberate shortcut or leaving something suboptimal";
+
+const HELP_UNKNOWN: &str = "Unknown topic. Valid topics: overview, workflow, roles, tools, \
+    DECISION, COMMIT, CONSTRAINT, LESSON, PLAN, FEATURE, STUB, DEFERRED, BUILDER_NOTE, TECH_DEBT";
+
+// ---- LoreHandler ------------------------------------------------------------
 
 /// The primary MCP server handler for Lorekeeper tools.
 pub struct LoreHandler {
@@ -27,6 +246,10 @@ impl std::fmt::Debug for LoreHandler {
 
 impl LoreHandler {
     /// Creates a new `LoreHandler` with the given repository.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo` - A thread-safe reference to an [`EntryRepository`] implementation.
     pub fn new(repo: Arc<dyn EntryRepository>) -> Self {
         Self { repo }
     }
@@ -60,140 +283,252 @@ impl LoreHandler {
         }
     }
 
+    #[rustfmt::skip]
+    #[allow(clippy::too_many_lines)]
     fn get_tools() -> Vec<Tool> {
+        let entry_type_enum = json!({
+            "type": "string",
+            "description": "The category of memory entry.",
+            "enum": ["DECISION","COMMIT","CONSTRAINT","LESSON","PLAN",
+                     "FEATURE","STUB","DEFERRED","BUILDER_NOTE","TECH_DEBT"]
+        });
+        let role_enum = json!({
+            "type": "string",
+            "description": "Your current TARS role. Must match role restrictions for entry type.",
+            "enum": ["architect", "builder"]
+        });
+        let id_field = json!({
+            "type": "string",
+            "format": "uuid",
+            "description": "UUID of the target entry."
+        });
+        let tags_field = json!({
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Lowercase keyword tags for searchability."
+        });
+        let related_field = json!({
+            "type": "array",
+            "items": {"type": "string", "format": "uuid"},
+            "description": "UUIDs of related memory entries."
+        });
+        let data_field = json!({
+            "type": "object",
+            "description": "Type-specific metadata. See tool description for schema per type."
+        });
+        let limit_field = json!({"type": "integer", "description": "Maximum results to return.", "default": 20});
+        let offset_field = json!({"type": "integer", "description": "Number of entries to skip for pagination.", "default": 0});
+
         vec![
+            // -- WRITE TOOLS --------------------------------------------------
             Self::make_tool(
-                "lore_store",
-                "Store a new memory entry (Decision, Commit, Constraint, etc.)",
+                "lorekeeper_store",
+                DESC_STORE,
                 HashMap::from([
-                    ("entry_type".into(), json!({"type": "string"})),
-                    ("title".into(), json!({"type": "string"})),
-                    ("body".into(), json!({"type": "string"})),
-                    ("role".into(), json!({"type": "string"})),
-                    ("tags".into(), json!({"type": "array", "items": {"type": "string"}})),
-                    (
-                        "related_entries".into(),
-                        json!({"type": "array", "items": {"type": "string"}}),
-                    ),
-                    ("data".into(), json!({"type": "object"})),
+                    ("entry_type".into(), entry_type_enum.clone()),
+                    ("title".into(), json!({"type":"string","description":"A brief one-line summary. Required, non-empty."})),
+                    ("body".into(), json!({"type":"string","description":"Extended description or reasoning. Optional."})),
+                    ("role".into(), role_enum),
+                    ("tags".into(), tags_field.clone()),
+                    ("related_entries".into(), related_field.clone()),
+                    ("data".into(), data_field.clone()),
                 ]),
                 vec!["entry_type".into(), "title".into(), "role".into()],
             ),
             Self::make_tool(
-                "lore_search",
-                "Search entries using FTS5 (title, body, tags)",
+                "lorekeeper_update",
+                DESC_UPDATE,
                 HashMap::from([
-                    ("query".into(), json!({"type": "string"})),
-                    ("entry_type".into(), json!({"type": "string"})),
-                    ("limit".into(), json!({"type": "integer", "default": 20})),
+                    ("id".into(), id_field.clone()),
+                    ("title".into(), json!({"type":"string","description":"New title (optional)."})),
+                    ("body".into(), json!({"type":"string","description":"New body (optional)."})),
+                    ("tags".into(), tags_field),
+                    ("related_entries".into(), related_field),
+                    ("data".into(), data_field),
+                ]),
+                vec!["id".into()],
+            ),
+            Self::make_tool(
+                "lorekeeper_delete",
+                DESC_DELETE,
+                HashMap::from([("id".into(), id_field.clone())]),
+                vec!["id".into()],
+            ),
+            Self::make_tool("lorekeeper_render", DESC_RENDER, HashMap::new(), vec![]),
+            // -- READ TOOLS ---------------------------------------------------
+            Self::make_tool(
+                "lorekeeper_search",
+                DESC_SEARCH,
+                HashMap::from([
+                    ("query".into(), json!({"type":"string","description":"Search keywords. FTS5 full-text search syntax."})),
+                    ("entry_type".into(), entry_type_enum.clone()),
+                    ("limit".into(), limit_field.clone()),
                 ]),
                 vec!["query".into()],
             ),
             Self::make_tool(
-                "lore_get",
-                "Retrieve a specific entry by ID",
-                HashMap::from([("id".into(), json!({"type": "string"}))]),
+                "lorekeeper_get",
+                DESC_GET,
+                HashMap::from([("id".into(), id_field)]),
                 vec!["id".into()],
             ),
             Self::make_tool(
-                "lore_update",
-                "Update an existing entry",
-                HashMap::from([
-                    ("id".into(), json!({"type": "string"})),
-                    ("title".into(), json!({"type": "string"})),
-                    ("body".into(), json!({"type": "string"})),
-                    ("tags".into(), json!({"type": "array", "items": {"type": "string"}})),
-                    (
-                        "related_entries".into(),
-                        json!({"type": "array", "items": {"type": "string"}}),
-                    ),
-                    ("data".into(), json!({"type": "object"})),
-                ]),
-                vec!["id".into()],
-            ),
-            Self::make_tool(
-                "lore_delete",
-                "Soft-delete an entry",
-                HashMap::from([("id".into(), json!({"type": "string"}))]),
-                vec!["id".into()],
-            ),
-            Self::make_tool(
-                "lore_recent",
-                "List recent entries",
-                HashMap::from([("limit".into(), json!({"type": "integer", "default": 10}))]),
+                "lorekeeper_recent",
+                DESC_RECENT,
+                HashMap::from([("limit".into(), json!({"type":"integer","description":"Number of entries to return.","default":10}))]),
                 vec![],
             ),
             Self::make_tool(
-                "lore_by_type",
-                "List entries by type with pagination",
+                "lorekeeper_by_type",
+                DESC_BY_TYPE,
                 HashMap::from([
-                    ("entry_type".into(), json!({"type": "string"})),
-                    ("limit".into(), json!({"type": "integer", "default": 20})),
-                    ("offset".into(), json!({"type": "integer", "default": 0})),
+                    ("entry_type".into(), entry_type_enum),
+                    ("limit".into(), limit_field),
+                    ("offset".into(), offset_field),
                 ]),
                 vec!["entry_type".into()],
             ),
-            Self::make_tool("lore_stats", "Get memory statistics", HashMap::new(), vec![]),
+            Self::make_tool("lorekeeper_stats", DESC_STATS, HashMap::new(), vec![]),
+            // -- HELP TOOL ----------------------------------------------------
+            Self::make_tool(
+                "lorekeeper_help",
+                DESC_HELP,
+                HashMap::from([("topic".into(), json!({
+                    "type": "string",
+                    "description": "Help topic. Omit for overview.",
+                    "enum": ["overview","workflow","roles","tools",
+                             "DECISION","COMMIT","CONSTRAINT","LESSON","PLAN",
+                             "FEATURE","STUB","DEFERRED","BUILDER_NOTE","TECH_DEBT"]
+                }))]),
+                vec![],
+            ),
         ]
     }
 
+    #[allow(clippy::too_many_lines)]
     fn handle_tool_call(&self, params: CallToolRequestParams) -> Result<Value, String> {
+        let tool_name = params.name.clone();
+        info!(tool = %tool_name, "tool call received");
+
         let args = params.arguments.unwrap_or_default();
         let args_value = Value::Object(args.clone());
 
         match params.name.as_str() {
-            "lore_store" => {
+            "lorekeeper_store" => {
                 let input: NewEntry =
                     serde_json::from_value(args_value).map_err(|e| e.to_string())?;
-                let entry = self.repo.store(input).map_err(|e| e.to_string())?;
+                let entry = self.repo.store(input).map_err(|e| {
+                    warn!(error = %e, "lorekeeper_store rejected");
+                    e.to_string()
+                })?;
+                info!(id = %entry.id.0, "entry stored");
                 Ok(json!({ "status": "success", "id": entry.id.0 }))
             }
-            "lore_search" => {
-                let query: SearchQuery =
-                    serde_json::from_value(args_value).map_err(|e| e.to_string())?;
-                let entries = self.repo.search(&query).map_err(|e| e.to_string())?;
-                serde_json::to_value(entries).map_err(|e| e.to_string())
-            }
-            "lore_get" => {
-                let id = args.get("id").and_then(|v| v.as_str()).ok_or("missing id")?;
-                let entry = self.repo.get(id).map_err(|e| e.to_string())?;
-                serde_json::to_value(entry).map_err(|e| e.to_string())
-            }
-            "lore_update" => {
+            "lorekeeper_update" => {
                 let id = args.get("id").and_then(|v| v.as_str()).ok_or("missing id")?;
                 let update: UpdateEntry =
                     serde_json::from_value(args_value).map_err(|e| e.to_string())?;
-                let entry = self.repo.update(id, update).map_err(|e| e.to_string())?;
+                let entry = self.repo.update(id, update).map_err(|e| {
+                    warn!(id = %id, error = %e, "lorekeeper_update rejected");
+                    e.to_string()
+                })?;
+                info!(id = %id, "entry updated");
                 serde_json::to_value(entry).map_err(|e| e.to_string())
             }
-            "lore_delete" => {
+            "lorekeeper_delete" => {
                 let id = args.get("id").and_then(|v| v.as_str()).ok_or("missing id")?;
-                self.repo.delete(id).map_err(|e| e.to_string())?;
+                self.repo.delete(id).map_err(|e| {
+                    warn!(id = %id, error = %e, "lorekeeper_delete failed");
+                    e.to_string()
+                })?;
+                info!(id = %id, "entry soft-deleted");
                 Ok(json!({ "status": "success" }))
             }
-            "lore_recent" => {
+            "lorekeeper_render" => {
+                let entries = self.repo.render_all().map_err(|e| {
+                    error!(error = %e, "lorekeeper_render: repo.render_all failed");
+                    e.to_string()
+                })?;
+                let md = render_entries(&entries);
+                Ok(json!({ "content": md }))
+            }
+            "lorekeeper_search" => {
+                let query: SearchQuery =
+                    serde_json::from_value(args_value).map_err(|e| e.to_string())?;
+                let entries = self.repo.search(&query).map_err(|e| {
+                    error!(error = %e, "lorekeeper_search: db error");
+                    e.to_string()
+                })?;
+                info!(results = entries.len(), "search complete");
+                serde_json::to_value(entries).map_err(|e| e.to_string())
+            }
+            "lorekeeper_get" => {
+                let id = args.get("id").and_then(|v| v.as_str()).ok_or("missing id")?;
+                let entry = self.repo.get(id).map_err(|e| {
+                    warn!(id = %id, error = %e, "lorekeeper_get: not found or error");
+                    e.to_string()
+                })?;
+                serde_json::to_value(entry).map_err(|e| e.to_string())
+            }
+            "lorekeeper_recent" => {
                 let limit = u32::try_from(
                     args.get("limit").and_then(serde_json::Value::as_u64).unwrap_or(10),
                 )
                 .unwrap_or(10);
-                let entries = self.repo.recent(limit).map_err(|e| e.to_string())?;
+                let entries = self.repo.recent(limit).map_err(|e| {
+                    error!(error = %e, "lorekeeper_recent: db error");
+                    e.to_string()
+                })?;
                 serde_json::to_value(entries).map_err(|e| e.to_string())
             }
-            "lore_by_type" => {
+            "lorekeeper_by_type" => {
                 let et_str =
                     args.get("entry_type").and_then(|v| v.as_str()).ok_or("missing entry_type")?;
                 let et: EntryType =
                     serde_json::from_value(json!(et_str)).map_err(|e| e.to_string())?;
                 let filters: Filters =
                     serde_json::from_value(args_value).map_err(|e| e.to_string())?;
-                let entries = self.repo.by_type(et, &filters).map_err(|e| e.to_string())?;
+                let entries = self.repo.by_type(et, &filters).map_err(|e| {
+                    error!(error = %e, "lorekeeper_by_type: db error");
+                    e.to_string()
+                })?;
                 serde_json::to_value(entries).map_err(|e| e.to_string())
             }
-            "lore_stats" => {
-                let stats = self.repo.stats().map_err(|e| e.to_string())?;
+            "lorekeeper_stats" => {
+                let stats = self.repo.stats().map_err(|e| {
+                    error!(error = %e, "lorekeeper_stats: db error");
+                    e.to_string()
+                })?;
                 serde_json::to_value(stats).map_err(|e| e.to_string())
             }
-            other => Err(format!("unknown tool: {other}")),
+            "lorekeeper_help" => {
+                let topic = args.get("topic").and_then(|v| v.as_str()).unwrap_or("overview");
+                Ok(json!({ "content": Self::get_help(topic) }))
+            }
+            other => {
+                warn!(tool = %other, "unknown tool called");
+                Err(format!("unknown tool: {other}"))
+            }
+        }
+    }
+
+    /// Returns contextual help text for a given topic.
+    fn get_help(topic: &str) -> &'static str {
+        match topic {
+            "overview" | "workflow" => HELP_OVERVIEW,
+            "roles" => HELP_ROLES,
+            "tools" => HELP_TOOLS,
+            "DECISION" => HELP_DECISION,
+            "COMMIT" => HELP_COMMIT,
+            "CONSTRAINT" => HELP_CONSTRAINT,
+            "LESSON" => HELP_LESSON,
+            "PLAN" => HELP_PLAN,
+            "FEATURE" => HELP_FEATURE,
+            "STUB" => HELP_STUB,
+            "DEFERRED" => HELP_DEFERRED,
+            "BUILDER_NOTE" => HELP_BUILDER_NOTE,
+            "TECH_DEBT" => HELP_TECH_DEBT,
+            _ => HELP_UNKNOWN,
         }
     }
 
