@@ -271,7 +271,20 @@ impl EntryRepository for SqliteEntryRepo {
             by_type.push(tc?);
         }
 
-        Ok(MemoryStats { total, by_type, last_updated })
+        let mut stmt = conn.prepare(
+            "SELECT json_extract(data, '$.status'), COUNT(*) \
+             FROM entry \
+             WHERE is_deleted = 0 AND json_extract(data, '$.status') IS NOT NULL \
+             GROUP BY json_extract(data, '$.status')",
+        )?;
+        let status_counts = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+
+        let mut by_status = Vec::new();
+        for sc in status_counts {
+            by_status.push(sc?);
+        }
+
+        Ok(MemoryStats { total, by_type, by_status, last_updated })
     }
 
     fn render_all(&self) -> Result<Vec<Entry>, LoreError> {
@@ -615,6 +628,61 @@ mod tests {
 
         let stats = repo.stats().unwrap();
         assert_eq!(stats.total, 2);
+    }
+
+    #[test]
+    fn stats_returns_status_breakdown() {
+        let repo = setup_repo();
+        // Store a planned PLAN
+        repo.store(NewEntry {
+            entry_type: EntryType::Plan,
+            title: "P1".into(),
+            body: None,
+            role: "architect".into(),
+            tags: None,
+            related_entries: None,
+            data: Some(serde_json::json!({ "scope": "s", "tier": "S", "status": "planned" })),
+        })
+        .unwrap();
+        // Store a planned PLAN (second one — same status to check count)
+        repo.store(NewEntry {
+            entry_type: EntryType::Plan,
+            title: "P2".into(),
+            body: None,
+            role: "architect".into(),
+            tags: None,
+            related_entries: None,
+            data: Some(serde_json::json!({ "scope": "s", "tier": "S", "status": "planned" })),
+        })
+        .unwrap();
+        // Store a STUB with a different status
+        repo.store(NewEntry {
+            entry_type: EntryType::Stub,
+            title: "S1".into(),
+            body: None,
+            role: "builder".into(),
+            tags: None,
+            related_entries: None,
+            data: Some(serde_json::json!({
+                "phase_number": 1,
+                "contract": "c",
+                "module": "m",
+                "status": "open"
+            })),
+        })
+        .unwrap();
+
+        let stats = repo.stats().unwrap();
+        assert_eq!(stats.total, 3);
+
+        // Find the counts in by_status
+        let planned_count =
+            stats.by_status.iter().find(|(s, _)| s == "planned").map_or(0, |(_, n)| *n);
+        let open_count =
+            stats.by_status.iter().find(|(s, _)| s == "open").map_or(0, |(_, n)| *n);
+
+        assert_eq!(planned_count, 2, "expected 2 PLANs with status=planned");
+        assert_eq!(open_count, 1, "expected 1 STUB with status=open");
     }
 
     #[test]

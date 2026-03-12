@@ -35,6 +35,8 @@ pub struct MemoryStats {
     pub total: u64,
     /// Count of entries grouped by type.
     pub by_type: Vec<(EntryType, u64)>,
+    /// Count of entries grouped by status (for stateful types: PLAN, STUB, FEATURE).
+    pub by_status: Vec<(String, u64)>,
     /// Timestamp of the most recent update.
     pub last_updated: Option<DateTime<Utc>>,
 }
