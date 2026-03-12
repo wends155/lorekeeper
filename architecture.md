@@ -37,7 +37,7 @@ context window consumption.
 - **10 typed entry types** (DECISION, COMMIT, CONSTRAINT, LESSON, PLAN, FEATURE,
   STUB, DEFERRED, BUILDER_NOTE, TECH_DEBT) with type-specific validation.
 - **FTS5 full-text search** across titles, bodies, and tags.
-- **8 MCP tools** (4 write, 4 read) for complete CRUD + search + analytics.
+- **11 MCP tools** (4 write, 5 read, 2 meta) for complete CRUD + search + analytics.
 - **Role enforcement** — server validates `role` field on every write operation.
 - **Markdown export** — `memory_render` generates human-readable output for review.
 - **Per-project database** — isolated `.lorekeeper/memory.db` per project root.
@@ -103,13 +103,9 @@ lorekeeper/
 │   │   └── sqlite.rs       # SqliteEntryRepo — concrete implementation
 │   └── server/
 │       ├── mod.rs          # MCP server setup, tool registration
-│       └── handlers.rs     # Individual tool handler functions
-└── tests/
-    ├── common/
-    │   └── mod.rs          # Shared test fixtures (in-memory DB setup)
-    ├── store_tests.rs      # Integration tests for SqliteEntryRepo
-    ├── validation_tests.rs # Integration tests for entry validation
-    └── server_tests.rs     # Integration tests for MCP tool handlers
+│       └── mod.rs          # MCP server setup, tool registration
+└── .lorekeeper/            # User data directory (managed by main)
+    └── memory.db           # SQLite database file
 ```
 
 ---
@@ -147,7 +143,7 @@ lorekeeper/
 
 ### `server` — MCP Tool Handlers
 
-- **Owns:** MCP server bootstrap, tool registration (8 tools), request parsing,
+- **Owns:** MCP server bootstrap, tool registration (11 tools), request parsing,
   response formatting, JSON-RPC error mapping.
 - **Does NOT Own:** Storage logic, validation, database access.
 - **Trait Interfaces:** Depends on `EntryRepository` trait (injected).
@@ -592,16 +588,22 @@ Directory created automatically on first run. Added to `.gitignore`.
 
 | Tool | Parameters | Validation |
 |:-----|:-----------|:-----------|
-| `memory_store` | `type`, `title`, `body?`, `role`, `tags?`, `related_entries?`, `data?` | Required fields per type, role permissions |
-| `memory_update` | `id`, `title?`, `body?`, `tags?`, `related_entries?`, `data?` | Entry must exist, re-validate merged state |
-| `memory_delete` | `id` | Entry must exist, sets `is_deleted=1` |
-| `memory_render` | `format?` (default: `markdown`) | — |
+| `lorekeeper_store` | `type`, `title`, `body?`, `role`, `tags?`, `related_entries?`, `data?` | Required fields per type, role permissions, UUID validation |
+| `lorekeeper_update` | `id`, `title?`, `body?`, `tags?`, `related_entries?`, `data?` | Entry must exist, state machine enforcement, UUID validation |
+| `lorekeeper_delete` | `id` | Entry must exist, sets `is_deleted=1` |
 
 ### Read Tools
 
 | Tool | Parameters | Returns |
 |:-----|:-----------|:--------|
-| `memory_search` | `query`, `type?`, `limit?` (default: 20) | FTS5 ranked results |
-| `memory_recent` | `n` (default: 10) | Last N entries by UUID v7 order |
-| `memory_by_type` | `type`, `status?`, `limit?` (default: 50), `offset?` | Filtered entries |
-| `memory_stats` | — | Counts per type, per status, last-updated, staleness |
+| `lorekeeper_search` | `query`, `type?`, `limit?` (default: 20) | FTS5 ranked results |
+| `lorekeeper_recent` | `n` (default: 10) | Last N entries by UUID v7 order |
+| `lorekeeper_by_type` | `type`, `status?`, `limit?` (default: 50), `offset?` | Filtered entries |
+| `lorekeeper_stats` | — | Counts per type, last-updated |
+| `lorekeeper_render` | `format?` (default: `markdown`) | Full memory dump grouped by type |
+
+### Meta Tools
+
+| Tool | Parameters | Returns |
+|:-----|:-----------|:--------|
+| `lorekeeper_help` | `topic` | Detailed guidance on entry types, roles, workflow |

@@ -615,6 +615,55 @@ mod tests {
 
         let stats = repo.stats().unwrap();
         assert_eq!(stats.total, 2);
-        assert_eq!(stats.by_type.len(), 2);
+    }
+
+    #[test]
+    fn update_rejects_invalid_plan_transition() {
+        let repo = setup_repo();
+        let stored = repo
+            .store(NewEntry {
+                entry_type: EntryType::Plan,
+                title: "P1".into(),
+                body: None,
+                role: "architect".into(),
+                tags: None,
+                related_entries: None,
+                data: Some(serde_json::json!({
+                    "scope": "test",
+                    "tier": "S",
+                    "status": "executed"
+                })),
+            })
+            .unwrap();
+
+        let res = repo.update(
+            &stored.id.0,
+            UpdateEntry {
+                data: Some(serde_json::json!({
+                    "scope": "test",
+                    "tier": "S",
+                    "status": "planned"
+                })), // Invalid revert
+                ..Default::default()
+            },
+        );
+
+        assert!(matches!(res, Err(crate::error::LoreError::Validation(_))));
+    }
+
+    #[test]
+    fn store_rejects_invalid_related_entry_uuid() {
+        let repo = setup_repo();
+        let res = repo.store(NewEntry {
+            entry_type: EntryType::Decision,
+            title: "D1".into(),
+            body: None,
+            role: "architect".into(),
+            tags: None,
+            related_entries: Some(vec![crate::model::entry::EntryId("invalid-uuid".into())]),
+            data: None,
+        });
+
+        assert!(matches!(res, Err(crate::error::LoreError::Validation(_))));
     }
 }

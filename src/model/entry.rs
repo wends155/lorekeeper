@@ -67,7 +67,7 @@ impl NewEntry {
 }
 
 /// Parameters for updating an existing memory entry.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UpdateEntry {
     /// New title for the entry.
     pub title: Option<String>,
