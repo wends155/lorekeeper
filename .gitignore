@@ -1,0 +1,4 @@
+/target/
+/.lorekeeper/
+/.env
+/.env.local
