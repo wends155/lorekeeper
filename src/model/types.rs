@@ -16,6 +16,7 @@ pub enum EntryType {
 }
 
 impl EntryType {
+    #[must_use]
     pub const fn allowed_roles(self) -> &'static [&'static str] {
         match self {
             Self::Decision | Self::Constraint | Self::Lesson | Self::Plan | Self::Feature => {

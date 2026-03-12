@@ -3,7 +3,7 @@ use crate::error::LoreError;
 
 pub fn validate_new_entry(entry: &NewEntry) -> Result<(), LoreError> {
     if entry.title.trim().is_empty() {
-        return Err(LoreError::Validation("title cannot be empty".to_string()));
+        return Err(LoreError::Validation("title cannot be empty".to_owned()));
     }
     validate_role(&entry.role, entry.entry_type)?;
     validate_update(entry.entry_type, entry.data.as_ref())?;
@@ -14,7 +14,7 @@ pub fn validate_role(role: &str, entry_type: EntryType) -> Result<(), LoreError>
     let allowed = entry_type.allowed_roles();
     if !allowed.contains(&role.to_lowercase().as_str()) {
         return Err(LoreError::RoleViolation {
-            role: role.to_string(),
+            role: role.to_owned(),
             entry_type: format!("{entry_type:?}"),
         });
     }
@@ -25,14 +25,13 @@ pub fn validate_update(
     entry_type: EntryType,
     data: Option<&serde_json::Value>,
 ) -> Result<(), LoreError> {
-    let data = match data {
-        Some(d) => d,
-        None => return Ok(()),
+    use super::types::{
+        BuilderNoteData, CommitData, ConstraintData, DeferredData, FeatureData, LessonData,
+        PlanData, StubData, TechDebtData,
     };
 
-    use super::types::{
-        BuilderNoteData, CommitData, ConstraintData, DeferredData, FeatureData, LessonData, PlanData,
-        StubData, TechDebtData,
+    let Some(data) = data else {
+        return Ok(());
     };
 
     match entry_type {
@@ -71,6 +70,8 @@ pub fn validate_update(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::panic, clippy::str_to_string)]
+
     use super::*;
 
     fn create_test_entry(entry_type: EntryType, data: Option<serde_json::Value>) -> NewEntry {
@@ -94,7 +95,7 @@ mod tests {
     #[test]
     fn validate_new_entry_missing_title() {
         let mut entry = create_test_entry(EntryType::Decision, None);
-        entry.title = "".to_string(); // Empty title should fail
+        entry.title = String::new(); // Empty title should fail
         let result = validate_new_entry(&entry);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), LoreError::Validation(_)));
@@ -114,20 +115,14 @@ mod tests {
     fn validate_role_builder_cannot_write_decision() {
         let result = validate_role("builder", EntryType::Decision);
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            LoreError::RoleViolation { .. }
-        ));
+        assert!(matches!(result.unwrap_err(), LoreError::RoleViolation { .. }));
     }
 
     #[test]
     fn validate_role_architect_cannot_write_commit() {
         let result = validate_role("architect", EntryType::Commit);
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            LoreError::RoleViolation { .. }
-        ));
+        assert!(matches!(result.unwrap_err(), LoreError::RoleViolation { .. }));
     }
 
     #[test]

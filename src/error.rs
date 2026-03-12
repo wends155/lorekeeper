@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+
 
 #[derive(Debug, thiserror::Error)]
 pub enum LoreError {
@@ -18,5 +18,5 @@ pub enum LoreError {
     Serialization(#[from] serde_json::Error),
 
     #[error("project root not found: {0}")]
-    ProjectRoot(PathBuf),
+    ProjectRoot(String),
 }
