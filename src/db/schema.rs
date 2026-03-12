@@ -1,6 +1,9 @@
+//! SQL schema definitions and migrations.
+
 use crate::error::LoreError;
 use rusqlite::Connection;
 
+/// SQL to create the main memory entry table.
 pub const CREATE_ENTRY_TABLE: &str = r"
 CREATE TABLE IF NOT EXISTS entry (
     id TEXT PRIMARY KEY,
@@ -17,6 +20,7 @@ CREATE TABLE IF NOT EXISTS entry (
 );
 ";
 
+/// SQL to create the FTS5 virtual table for full-text search.
 pub const CREATE_FTS_TABLE: &str = r"
 CREATE VIRTUAL TABLE IF NOT EXISTS entry_fts USING fts5(
     title,
@@ -28,6 +32,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS entry_fts USING fts5(
 );
 ";
 
+/// Trigger to sync FTS5 table on INSERT into `entry`.
 pub const CREATE_FTS_INSERT_TRIGGER: &str = r"
 CREATE TRIGGER IF NOT EXISTS entry_fts_insert AFTER INSERT ON entry BEGIN
   INSERT INTO entry_fts(rowid, title, body, tags_text)
@@ -35,6 +40,7 @@ CREATE TRIGGER IF NOT EXISTS entry_fts_insert AFTER INSERT ON entry BEGIN
 END;
 ";
 
+/// Trigger to sync FTS5 table on UPDATE of `entry`.
 pub const CREATE_FTS_UPDATE_TRIGGER: &str = r"
 CREATE TRIGGER IF NOT EXISTS entry_fts_update AFTER UPDATE ON entry BEGIN
   INSERT INTO entry_fts(entry_fts, rowid, title, body, tags_text) 
@@ -44,6 +50,7 @@ CREATE TRIGGER IF NOT EXISTS entry_fts_update AFTER UPDATE ON entry BEGIN
 END;
 ";
 
+/// Trigger to sync FTS5 table on DELETE from `entry`.
 pub const CREATE_FTS_DELETE_TRIGGER: &str = r"
 CREATE TRIGGER IF NOT EXISTS entry_fts_delete AFTER DELETE ON entry BEGIN
   INSERT INTO entry_fts(entry_fts, rowid, title, body, tags_text) 
@@ -51,12 +58,14 @@ CREATE TRIGGER IF NOT EXISTS entry_fts_delete AFTER DELETE ON entry BEGIN
 END;
 ";
 
+/// SQL to create the schema version tracking table.
 pub const CREATE_SCHEMA_VERSION_TABLE: &str = r"
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER PRIMARY KEY
 );
 ";
 
+/// Initializes the database schema and performs migrations.
 pub fn init_schema(conn: &Connection) -> Result<(), LoreError> {
     let tx = conn.unchecked_transaction()?;
 

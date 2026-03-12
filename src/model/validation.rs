@@ -1,6 +1,14 @@
+//! Validation logic for TARS role enforcement and schema compliance.
+
 use super::{entry::NewEntry, types::EntryType};
 use crate::error::LoreError;
 
+/// Validates a new entry against role and type-specific rules.
+///
+/// This checks:
+/// 1. Title is not empty.
+/// 2. Role is authorized to write this entry type.
+/// 3. Metadata schema matches the entry type.
 pub fn validate_new_entry(entry: &NewEntry) -> Result<(), LoreError> {
     if entry.title.trim().is_empty() {
         return Err(LoreError::Validation("title cannot be empty".to_owned()));
@@ -10,6 +18,7 @@ pub fn validate_new_entry(entry: &NewEntry) -> Result<(), LoreError> {
     Ok(())
 }
 
+/// Validates that a role is authorized to write a specific entry type.
 pub fn validate_role(role: &str, entry_type: EntryType) -> Result<(), LoreError> {
     let allowed = entry_type.allowed_roles();
     if !allowed.contains(&role.to_lowercase().as_str()) {
@@ -21,6 +30,7 @@ pub fn validate_role(role: &str, entry_type: EntryType) -> Result<(), LoreError>
     Ok(())
 }
 
+/// Validates the JSON metadata for an entry against its specific Rust type.
 pub fn validate_update(
     entry_type: EntryType,
     data: Option<&serde_json::Value>,

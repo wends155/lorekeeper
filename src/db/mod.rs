@@ -1,9 +1,12 @@
+//! Database connection management and schema initialization.
+
 pub mod schema;
 
 use crate::error::LoreError;
 use rusqlite::Connection;
 use std::path::Path;
 
+/// A wrapper around a `SQLite` database connection.
 #[derive(Debug)]
 pub struct Database {
     conn: Connection,
@@ -15,6 +18,10 @@ impl Database {
         &self.conn
     }
 
+    /// Opens a connection to a `SQLite` database at the specified path.
+    ///
+    /// This creates parent directories if they don't exist, enables WAL mode,
+    /// and initializes the schema.
     pub fn open(path: &Path) -> Result<Self, LoreError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -29,6 +36,9 @@ impl Database {
         Ok(Self { conn })
     }
 
+    /// Opens an in-memory `SQLite` database connection.
+    ///
+    /// Useful for testing. Initializes the schema.
     pub fn open_in_memory() -> Result<Self, LoreError> {
         let conn = Connection::open_in_memory()?;
         // Even for in-memory, setting WAL won't hurt, though it might stay 'memory'
@@ -37,6 +47,11 @@ impl Database {
         schema::init_schema(&conn)?;
 
         Ok(Self { conn })
+    }
+
+    /// Transfer ownership of the connection (used by `SqliteEntryRepo`).
+    pub fn into_connection(self) -> Connection {
+        self.conn
     }
 }
 

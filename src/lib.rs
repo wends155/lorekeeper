@@ -1,4 +1,3 @@
-#![allow(missing_docs)]
 #![allow(clippy::missing_errors_doc)]
 
 //! Lorekeeper MCP Server
@@ -7,3 +6,6 @@
 pub mod db;
 pub mod error;
 pub mod model;
+pub mod render;
+pub mod server;
+pub mod store;
