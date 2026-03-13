@@ -678,8 +678,7 @@ mod tests {
         // Find the counts in by_status
         let planned_count =
             stats.by_status.iter().find(|(s, _)| s == "planned").map_or(0, |(_, n)| *n);
-        let open_count =
-            stats.by_status.iter().find(|(s, _)| s == "open").map_or(0, |(_, n)| *n);
+        let open_count = stats.by_status.iter().find(|(s, _)| s == "open").map_or(0, |(_, n)| *n);
 
         assert_eq!(planned_count, 2, "expected 2 PLANs with status=planned");
         assert_eq!(open_count, 1, "expected 1 STUB with status=open");

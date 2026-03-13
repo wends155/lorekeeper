@@ -132,3 +132,25 @@ pub(super) fn get_help(topic: &str) -> &'static str {
         _ => HELP_UNKNOWN,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_help_returns_known_topics() {
+        assert!(get_help("overview").contains("Workflow Guide"));
+        assert!(get_help("workflow").contains("Workflow Guide"));
+        assert!(get_help("roles").contains("Role Enforcement"));
+        assert!(get_help("tools").contains("lorekeeper_store"));
+        assert!(get_help("PLAN").contains("planned"));
+        assert!(get_help("STUB").contains("open"));
+    }
+
+    #[test]
+    fn get_help_returns_fallback_for_unknown() {
+        let result = get_help("nonexistent_topic");
+        assert!(result.contains("Unknown topic"));
+        assert!(result.contains("Valid topics"));
+    }
+}

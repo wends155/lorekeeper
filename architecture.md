@@ -103,7 +103,7 @@ lorekeeper/
 │   │   └── sqlite.rs       # SqliteEntryRepo — concrete implementation
 │   └── server/
 │       ├── mod.rs          # MCP server setup, tool registration
-│       └── mod.rs          # MCP server setup, tool registration
+│       └── help.rs         # Help topic dispatcher
 └── .lorekeeper/            # User data directory (managed by main)
     └── memory.db           # SQLite database file
 ```
@@ -599,7 +599,7 @@ Directory created automatically on first run. Added to `.gitignore`.
 | `lorekeeper_search` | `query`, `type?`, `limit?` (default: 20) | FTS5 ranked results |
 | `lorekeeper_recent` | `n` (default: 10) | Last N entries by UUID v7 order |
 | `lorekeeper_by_type` | `type`, `status?`, `limit?` (default: 50), `offset?` | Filtered entries |
-| `lorekeeper_stats` | — | Counts per type, last-updated |
+| `lorekeeper_stats` | — | Counts per type, by-status breakdown, last-updated |
 | `lorekeeper_render` | `format?` (default: `markdown`) | Full memory dump grouped by type |
 
 ### Meta Tools
