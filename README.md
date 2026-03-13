@@ -1,0 +1,70 @@
+# Lorekeeper
+
+> Agent Long-Term Memory Bank using SQLite and FTS5.
+
+Lorekeeper is a Rust MCP (Model Context Protocol) server that provides structured long-term memory for AI coding agents (operating under the TARS protocol or similar workflows). It replaces flat-file history with a queryable SQLite database, enabling agents to store, search, and retrieve typed memory entries via MCP tools over stdio.
+
+## Key Features
+
+- **Context Window Management:** Reduces per-session token load by allowing selective retrieval.
+- **Typed Entries:** 10 semantic entry types (e.g., `DECISION`, `COMMIT`, `PLAN`, `LESSON`, `TECH_DEBT`).
+- **Role Enforcement:** Mechanically prevents unauthorized writes (e.g., Builder agents cannot assert architectural constraints).
+- **Full-Text Search:** Backed by SQLite FTS5 across titles, bodies, and tags.
+- **Rich Interaction:** 11 MCP tools covering CRUD, search, and memory analytics.
+- **Isolated Storage:** Automatically manages a project-local SQLite database (`.lorekeeper/memory.db`).
+
+## Installation
+
+### From Source
+
+Requires Rust 1.85.0+ (Edition 2024).
+
+```sh
+# Clone the repository
+cargo install --path .
+# Alternatively, if just is installed:
+just install
+```
+
+## MCP Configuration
+
+To use Lorekeeper with MCP-compatible clients (like Claude Desktop or custom agents), add the server to your `mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "lorekeeper": {
+      "command": "lorekeeper"
+    }
+  }
+}
+```
+
+*Note: Ensure the `lorekeeper` executable is in your system's `PATH`, or provide the absolute path to the binary.*
+
+## Usage for Agents
+
+Lorekeeper provides the following MCP tools for agentic workflows:
+
+- **Write:** `lorekeeper_store`, `lorekeeper_update`, `lorekeeper_delete`
+- **Read:** `lorekeeper_get`, `lorekeeper_search`, `lorekeeper_recent`, `lorekeeper_by_type`
+- **Meta:** `lorekeeper_stats`, `lorekeeper_render`, `lorekeeper_help`
+
+Agents can self-discover capabilities by calling `lorekeeper_help`.
+
+## Development
+
+The project uses `just` for automation.
+
+```sh
+# Run the verification pipeline (fmt, clippy, test)
+just check
+
+# Run tests only
+just test
+
+# Build the project
+just build
+```
+
+The database resides locally at `<PROJECT_ROOT>/.lorekeeper/memory.db`.

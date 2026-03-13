@@ -6,7 +6,7 @@
 | **Version** | 1 |
 | **Last Updated** | 2026-03-13 |
 
-> Last verified against: (initial draft)
+> Last verified against: `1237020` (2026-03-13, Phases 0-G complete)
 
 ---
 
@@ -113,11 +113,14 @@ stateDiagram-v2
 | Function | Signature | Returns | Errors |
 |----------|-----------|---------|--------|
 | `store` | `(&self, input: NewEntry) -> Result<Entry>` | `Entry` | `Database`, `Validation` |
-| `update` | `(&self, id: &EntryId, update: UpdateEntry) -> Result<Entry>` | `Entry` | `Database`, `Validation`, `NotFound` |
-| `delete` | `(&self, id: &EntryId) -> Result<()>` | `()` | `Database`, `NotFound` |
+| `get` | `(&self, id: &str) -> Result<Entry>` | `Entry` | `NotFound` |
+| `update` | `(&self, id: &str, update: UpdateEntry) -> Result<Entry>` | `Entry` | `Database`, `Validation`, `NotFound` |
+| `delete` | `(&self, id: &str) -> Result<()>` | `()` | `Database`, `NotFound` |
 | `search` | `(&self, query: &SearchQuery) -> Result<Vec<Entry>>` | `Vec<Entry>` | `Database` |
 | `recent` | `(&self, limit: u32) -> Result<Vec<Entry>>` | `Vec<Entry>` | `Database` |
 | `by_type` | `(&self, entry_type: EntryType, filters: &Filters) -> Result<Vec<Entry>>` | `Vec<Entry>` | `Database` |
+| `stats` | `(&self) -> Result<MemoryStats>` | `MemoryStats` | `Database` |
+| `render_all` | `(&self) -> Result<Vec<Entry>>` | `Vec<Entry>` | `Database` |
 
 ### Behavioral Scenarios
 
