@@ -11,6 +11,8 @@
 - Added a fallback to an in-memory SQLite database when starting without a project root.
 - Added a tool call guard in `handle_tool_call` to enforce that agents must call `lorekeeper_set_root` to start making data modifications.
 - Updated the connection instructions and removed the hard `LOREKEEPER_ROOT` dependency from `mcp_config.json`.
+- Synced `README.md` and `architecture.md` tool counts (12 total), updated config examples, and documented `lorekeeper_set_root` and `lorekeeper_reflect`.
+- Created and pushed git tags for `v0.3.0` and `v0.3.1`.
 
 ### [x] Release v0.3.0 (2026-03-16)
 - Implemented multi-project support via the `lorekeeper_set_root` tool.

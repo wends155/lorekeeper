@@ -9,10 +9,10 @@ Lorekeeper is a Rust MCP (Model Context Protocol) server that provides structure
 ## Key Features
 
 - **Context Window Management:** Reduces per-session token load by allowing selective retrieval.
-- **Typed Entries:** 11 semantic entry types (e.g., `DECISION`, `COMMIT`, `PLAN`, `LESSON`, `SESSION_SUMMARY`).
+- **Typed Entries:** 10 semantic entry types (e.g., `DECISION`, `COMMIT`, `PLAN`, `LESSON`, `BUILDER_NOTE`).
 - **Role Enforcement:** Mechanically prevents unauthorized writes (e.g., Builder agents cannot assert architectural constraints).
 - **Full-Text Search:** Backed by SQLite FTS5 across titles, bodies, and tags.
-- **Rich Interaction:** 11 MCP tools covering CRUD, search, and memory analytics.
+- **Rich Interaction:** 12 MCP tools covering CRUD, search, config, and memory analytics.
 - **Isolated Storage:** Automatically manages a project-local SQLite database (`.lorekeeper/memory.db`).
 
 ## Installation
@@ -33,16 +33,13 @@ just install
 To use Lorekeeper with MCP-compatible clients, add the server to your configuration. 
 Since `cargo install` places the binary in `~/.cargo/bin/`, which should be on your PATH, you can usually use the bare command. If it fails to spawn, use the absolute path to `lorekeeper.exe`.
 
-> **Note:** Set `LOREKEEPER_ROOT` to the project directory if the server isn't launched from within a project that contains a `.git/` or `.lorekeeper/` directory.
+> **Note:** At session start, agents call `lorekeeper_set_root` to point the server at the active project directory. The `LOREKEEPER_ROOT` environment variable is optional and only needed if the server isn't launched from within a project.
 
 **Antigravity (`mcp_config.json`):**
 ```json
 "lorekeeper": {
   "command": "lorekeeper",
-  "args": [],
-  "env": {
-    "LOREKEEPER_ROOT": "/path/to/your/project"
-  }
+  "args": []
 }
 ```
 
@@ -51,10 +48,7 @@ Since `cargo install` places the binary in `~/.cargo/bin/`, which should be on y
 {
   "mcpServers": {
     "lorekeeper": {
-      "command": "lorekeeper",
-      "env": {
-        "LOREKEEPER_ROOT": "/path/to/your/project"
-      }
+      "command": "lorekeeper"
     }
   }
 }
@@ -66,8 +60,9 @@ Lorekeeper provides the following MCP tools for agentic workflows:
 
 - **Write:** `lorekeeper_store`, `lorekeeper_update`, `lorekeeper_delete`
 - **Read:** `lorekeeper_get`, `lorekeeper_search`, `lorekeeper_recent`, `lorekeeper_by_type`, `lorekeeper_render`
-- **Health:** `lorekeeper_reflect` (detects duplicates/staleness)
-- **Meta:** `lorekeeper_stats`, `lorekeeper_help`
+- **Health:** `lorekeeper_stats`, `lorekeeper_reflect`
+- **Config:** `lorekeeper_set_root` (switch active project root)
+- **Meta:** `lorekeeper_help`
 
 Agents can self-discover capabilities by calling `lorekeeper_help`.
 

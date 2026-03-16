@@ -1,7 +1,7 @@
 # Lorekeeper — Architecture
 
 > **Technical Source of Truth** for the Lorekeeper project.
-> Last updated: 2026-03-13
+> Last updated: 2026-03-16
 
 ---
 
@@ -37,7 +37,7 @@ context window consumption.
 - **10 typed entry types** (DECISION, COMMIT, CONSTRAINT, LESSON, PLAN, FEATURE,
   STUB, DEFERRED, BUILDER_NOTE, TECH_DEBT) with type-specific validation.
 - **FTS5 full-text search** across titles, bodies, and tags.
-- **10 MCP tools** (3 write, 5 read, 2 meta) for complete CRUD + search + analytics.
+- **12 MCP tools** (3 write, 5 read, 2 health, 1 config, 1 meta) for complete CRUD + search + analytics.
 - **Role enforcement** — server validates `role` field on every write operation.
 - **Markdown export** — `memory_render` generates human-readable output for review.
 - **Per-project database** — isolated `.lorekeeper/memory.db` per project root.
@@ -143,7 +143,7 @@ lorekeeper/
 
 ### `server` — MCP Tool Handlers
 
-- **Owns:** MCP server bootstrap, tool registration (10 tools), request parsing,
+- **Owns:** MCP server bootstrap, tool registration (12 tools), request parsing,
   response formatting, JSON-RPC error mapping.
 - **Does NOT Own:** Storage logic, validation, database access.
 - **Trait Interfaces:** Depends on `EntryRepository` trait (injected).
@@ -570,7 +570,7 @@ service.
 1. Check `LOREKEEPER_ROOT` env var → use if set.
 2. Walk up from CWD looking for `.lorekeeper/` directory → use parent.
 3. Walk up from CWD looking for `.git` directory → use parent.
-4. Fail with `LoreError::ProjectRoot` if none found.
+4. Fall back to in-memory database; agents must call `lorekeeper_set_root` to activate a project.
 
 ### Database File Location
 
@@ -599,8 +599,20 @@ Directory created automatically on first run. Added to `.gitignore`.
 | `lorekeeper_search` | `query`, `type?`, `limit?` (default: 20) | FTS5 ranked results |
 | `lorekeeper_recent` | `n` (default: 10) | Last N entries by UUID v7 order |
 | `lorekeeper_by_type` | `type`, `status?`, `limit?` (default: 50), `offset?` | Filtered entries |
-| `lorekeeper_stats` | — | Counts per type, by-status breakdown, last-updated |
 | `lorekeeper_render` | `format?` (default: `markdown`) | Full memory dump grouped by type |
+
+### Config Tools
+
+| Tool | Parameters | Returns |
+|:-----|:-----------|:--------|
+| `lorekeeper_set_root` | `path` | Switches active project DB to `<path>/.lorekeeper/memory.db` |
+
+### Health Tools
+
+| Tool | Parameters | Returns |
+|:-----|:-----------|:--------|
+| `lorekeeper_stats` | — | Counts per type, by-status breakdown, last-updated |
+| `lorekeeper_reflect` | `focus?`, `limit?`, `stale_days?`, `min_access_count?` | Stale, dead, hot, orphaned, contradictions report |
 
 ### Meta Tools
 
