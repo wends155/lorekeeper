@@ -61,8 +61,10 @@ async fn main() -> Result<(), LoreError> {
 
     // 5. Load project config (auto-generates defaults if .lorekeeper/config.toml is missing)
     let config = LoreConfig::load(&lorekeeper_dir);
-    info!("Loaded config: stale_days={}, similarity_threshold={:.2}",
-        config.reflect.stale_days, config.store.similarity_threshold);
+    info!(
+        "Loaded config: stale_days={}, similarity_threshold={:.2}",
+        config.reflect.stale_days, config.store.similarity_threshold
+    );
 
     // 6. Build MCP server
     let handler = LoreHandler::new(repo, config);

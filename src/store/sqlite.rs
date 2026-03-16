@@ -347,9 +347,8 @@ impl EntryRepository for SqliteEntryRepo {
             return Ok(vec![]);
         }
 
-        let type_str = serde_json::to_string(&entry_type)
-            .map_err(LoreError::Serialization)?
-            .replace('"', "");
+        let type_str =
+            serde_json::to_string(&entry_type).map_err(LoreError::Serialization)?.replace('"', "");
 
         // BM25 score in FTS5 is negative (more negative = more similar)
         let mut stmt = conn.prepare(
@@ -361,17 +360,14 @@ impl EntryRepository for SqliteEntryRepo {
              LIMIT 3",
         )?;
 
-        let rows = stmt.query_map(
-            rusqlite::params![sanitized, type_str],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, f64>(3)?,
-                ))
-            },
-        )?;
+        let rows = stmt.query_map(rusqlite::params![sanitized, type_str], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, f64>(3)?,
+            ))
+        })?;
 
         let mut results = Vec::new();
         for row in rows {
@@ -391,19 +387,16 @@ impl EntryRepository for SqliteEntryRepo {
         criteria: &ReflectCriteria,
         config: &LoreConfig,
     ) -> Result<ReflectReport, LoreError> {
-        use crate::model::types::{
-            MemoryState, ReflectFinding, ReflectFocus, ReflectSummary,
-        };
+        use crate::model::types::{MemoryState, ReflectFinding, ReflectFocus, ReflectSummary};
 
         let conn = self.conn.lock().map_err(|e| LoreError::Poison(e.to_string()))?;
         let limit = i64::from(criteria.limit.unwrap_or(20));
 
         // Determine memory state
-        let total_count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM entry WHERE is_deleted = 0",
-            [],
-            |row| row.get(0),
-        )?;
+        let total_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM entry WHERE is_deleted = 0", [], |row| {
+                row.get(0)
+            })?;
 
         let state = match total_count {
             0 => MemoryState::Empty,
@@ -414,18 +407,19 @@ impl EntryRepository for SqliteEntryRepo {
 
         let guidance = match &state {
             MemoryState::Empty => Some(
-                "No entries yet. Store your first memory with lorekeeper_store to get started.".to_owned(),
+                "No entries yet. Store your first memory with lorekeeper_store to get started."
+                    .to_owned(),
             ),
             MemoryState::Nascent => Some(
-                "Memory bank is nascent (<5 entries). Results may not be representative yet.".to_owned(),
+                "Memory bank is nascent (<5 entries). Results may not be representative yet."
+                    .to_owned(),
             ),
             _ => None,
         };
 
         let stale_days = i64::from(criteria.stale_days.unwrap_or(config.reflect.stale_days));
-        let hot_threshold = i64::from(
-            criteria.min_access_count.unwrap_or(config.reflect.hot_access_threshold),
-        );
+        let hot_threshold =
+            i64::from(criteria.min_access_count.unwrap_or(config.reflect.hot_access_threshold));
         let dead_days = i64::from(config.reflect.dead_entry_days);
 
         let mut findings: Vec<ReflectFinding> = Vec::new();
@@ -578,22 +572,15 @@ impl EntryRepository for SqliteEntryRepo {
                     row.get::<_, String>(3)?,
                 ))
             })?;
-            for row in rows {
-                match row {
-                    Ok((id, et, title, similar_title)) => {
-                        summary.contradictions += 1;
-                        findings.push(ReflectFinding {
-                            category: "contradictions".to_owned(),
-                            entry_id: id,
-                            entry_type: et,
-                            title,
-                            reason: format!("Textually similar to: \"{similar_title}\""),
-                        });
-                    }
-                    Err(_) => {
-                        // FTS5 self-join may not be supported on all SQLite builds; skip silently
-                    }
-                }
+            for (id, et, title, similar_title) in rows.flatten() {
+                summary.contradictions += 1;
+                findings.push(ReflectFinding {
+                    category: "contradictions".to_owned(),
+                    entry_id: id,
+                    entry_type: et,
+                    title,
+                    reason: format!("Textually similar to: \"{similar_title}\""),
+                });
             }
         }
 

@@ -7,7 +7,7 @@ use std::path::Path;
 use tracing::warn;
 
 /// Top-level Lorekeeper configuration.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(default)]
 pub struct LoreConfig {
     /// Configuration for the `lorekeeper_reflect` tool.
@@ -36,11 +36,6 @@ pub struct StoreConfig {
     pub similarity_threshold: f64,
 }
 
-impl Default for LoreConfig {
-    fn default() -> Self {
-        Self { reflect: ReflectConfig::default(), store: StoreConfig::default() }
-    }
-}
 
 impl Default for ReflectConfig {
     fn default() -> Self {

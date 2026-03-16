@@ -269,4 +269,3 @@ pub struct SimilarEntry {
     /// BM25 similarity score (higher magnitude = more similar).
     pub score: f64,
 }
-

@@ -361,9 +361,8 @@ impl LoreHandler {
 
                 // Duplicate detection: find similar entries in the same type
                 let threshold = self.config.store.similarity_threshold;
-                let similar = self.repo
-                    .find_similar(&title, body, entry_type, threshold)
-                    .unwrap_or_default();
+                let similar =
+                    self.repo.find_similar(&title, body, entry_type, threshold).unwrap_or_default();
 
                 if similar.is_empty() {
                     Ok(json!({ "status": "success", "id": entry.id.0 }))
