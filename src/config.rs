@@ -36,7 +36,6 @@ pub struct StoreConfig {
     pub similarity_threshold: f64,
 }
 
-
 impl Default for ReflectConfig {
     fn default() -> Self {
         Self { stale_days: 30, dead_entry_days: 7, hot_access_threshold: 5 }
@@ -105,6 +104,7 @@ impl LoreConfig {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use tempfile::TempDir;

@@ -6,6 +6,11 @@
 - All technical debt from the initial audit has been remediated.
 - The project is fully functional, lint-compliant, and well-tested.
 
+### [x] Builtin Help System Resync (2026-03-16)
+- Remediated 8 documentation findings from the Auto-Evolution audit.
+- Synced `help.rs` and `main.rs` to include `SESSION_SUMMARY`, `lorekeeper_reflect`, and access/duplicate tracking.
+- Verified 100% compliance gate (zero fmt/lint/test/doc warnings).
+
 ### [x] Full Compliance Audit & Remediation (2026-03-13)
 - Conducted full project audit against `coding-standard.md` and `architecture.md`.
 - Triaged 80 Narsil security findings (all FPs).

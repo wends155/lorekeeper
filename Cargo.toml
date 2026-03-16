@@ -2,9 +2,23 @@
 name = "lorekeeper"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85.0"
-publish = false
-
+rust-version = "1.94.0"
+description = "Agent long-term memory bank — MCP server with SQLite and FTS5"
+license = "MIT"
+repository = "https://github.com/wends155/lorekeeper"
+readme = "README.md"
+keywords = ["mcp", "ai-agent", "memory", "sqlite", "fts5"]
+categories = ["command-line-utilities", "database"]
+exclude = [
+    ".agent/",
+    "architecture.md",
+    "spec.md",
+    "context.md",
+    "brainstorm_memory_bank.md",
+    "justfile",
+    "rustfmt.toml",
+    "design/",
+]
 [dependencies]
 rusqlite = { version = "0.33.0", features = ["bundled", "chrono"] }
 uuid = { version = "1.15.0", features = ["v7", "serde"] }
