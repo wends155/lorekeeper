@@ -7,8 +7,9 @@ const HELP_OVERVIEW: &str = "# Lorekeeper - Workflow Guide\n\n\
     Lorekeeper is your persistent structured memory bank. It survives across sessions.\n\n\
     ## Session Start\n\
     1. Call lorekeeper_stats - see current state of the memory bank\n\
-    2. Call lorekeeper_recent - load recent context (last 10 entries)\n\
-    3. Call lorekeeper_search - check for prior decisions and constraints\n\n\
+    2. Call lorekeeper_reflect - surface stale, dead, or duplicate entries\n\
+    3. Call lorekeeper_recent - load recent context (last 10 entries)\n\
+    4. Call lorekeeper_search - check for prior decisions and constraints\n\n\
     ## During Work\n\
     - Decision made -> lorekeeper_store type DECISION (architect role)\n\
     - Commit complete -> lorekeeper_store type COMMIT (builder role)\n\
@@ -17,31 +18,36 @@ const HELP_OVERVIEW: &str = "# Lorekeeper - Workflow Guide\n\n\
     - Plan created -> lorekeeper_store type PLAN (architect role)\n\
     - Work deferred -> lorekeeper_store type DEFERRED (either role)\n\
     - Tech debt noted -> lorekeeper_store type TECH_DEBT (either role)\n\n\
+    Note: lorekeeper_store returns similar_entries when potential duplicates are detected.\n\
+    Review them before creating duplicate entries.\n\n\
     ## Session End\n\
+    - Summarize session -> lorekeeper_store type SESSION_SUMMARY (either role)\n\
     - Update PLAN status to executed or abandoned via lorekeeper_update\n\
     - Resolve completed STUBs via lorekeeper_update\n\
     - Optionally call lorekeeper_render for a human-readable dump";
 
 const HELP_ROLES: &str = "# Role Enforcement\n\n\
-    | Role      | Allowed Types                                      |\n\
-    |-----------|----------------------------------------------------||\n\
-    | architect | DECISION, CONSTRAINT, LESSON, PLAN, FEATURE        |\n\
-    | builder   | COMMIT, STUB, BUILDER_NOTE                         |\n\
-    | both      | DEFERRED, TECH_DEBT                                |\n\n\
+    | Role      | Allowed Types                                          |\n\
+    |-----------|--------------------------------------------------------|\n\
+    | architect | DECISION, CONSTRAINT, LESSON, PLAN, FEATURE            |\n\
+    | builder   | COMMIT, STUB, BUILDER_NOTE                             |\n\
+    | both      | DEFERRED, TECH_DEBT, SESSION_SUMMARY                   |\n\n\
     Role violations are rejected server-side with a validation error.";
 
 const HELP_TOOLS: &str = "# Lorekeeper Tools\n\n\
     ## Write\n\
-    - lorekeeper_store  - create new entry\n\
+    - lorekeeper_store  - create new entry (returns similar_entries on duplicates)\n\
     - lorekeeper_update - update existing entry\n\
     - lorekeeper_delete - soft-delete entry\n\
     - lorekeeper_render - export all entries as Markdown\n\n\
     ## Read\n\
     - lorekeeper_search  - full-text search (FTS5)\n\
-    - lorekeeper_get     - retrieve by UUID\n\
+    - lorekeeper_get     - retrieve by UUID (tracks access count)\n\
     - lorekeeper_recent  - list newest entries\n\
     - lorekeeper_by_type - list filtered by type\n\
     - lorekeeper_stats   - aggregate counts\n\n\
+    ## Health\n\
+    - lorekeeper_reflect - analyze memory bank, surface stale/dead/hot/orphaned/contradictions\n\n\
     ## Help\n\
     - lorekeeper_help - this tool";
 
@@ -107,8 +113,15 @@ const HELP_TECH_DEBT: &str = "# TECH_DEBT\n\
     - data: { severity: low|medium|high, origin_phase: N }\n\
     - Use: when introducing a deliberate shortcut or leaving something suboptimal";
 
+const HELP_SESSION_SUMMARY: &str = "# SESSION_SUMMARY\n\
+    Records a concise summary of the work completed in a session.\n\
+    - Role: architect or builder\n\
+    - data: { phase: <think|act|reflect>, tools_used: [list], entries_created: N }\n\
+    - Use: at the end of each session to capture high-level context for future sessions";
+
 const HELP_UNKNOWN: &str = "Unknown topic. Valid topics: overview, workflow, roles, tools, \
-    DECISION, COMMIT, CONSTRAINT, LESSON, PLAN, FEATURE, STUB, DEFERRED, BUILDER_NOTE, TECH_DEBT";
+    DECISION, COMMIT, CONSTRAINT, LESSON, PLAN, FEATURE, STUB, DEFERRED, BUILDER_NOTE, \
+    TECH_DEBT, SESSION_SUMMARY";
 
 /// Returns contextual help text for the given topic keyword.
 ///
@@ -129,6 +142,7 @@ pub(super) fn get_help(topic: &str) -> &'static str {
         "DEFERRED" => HELP_DEFERRED,
         "BUILDER_NOTE" => HELP_BUILDER_NOTE,
         "TECH_DEBT" => HELP_TECH_DEBT,
+        "SESSION_SUMMARY" => HELP_SESSION_SUMMARY,
         _ => HELP_UNKNOWN,
     }
 }
@@ -165,6 +179,7 @@ mod tests {
             "DEFERRED",
             "BUILDER_NOTE",
             "TECH_DEBT",
+            "SESSION_SUMMARY",
         ];
         for topic in topics {
             let result = get_help(topic);
