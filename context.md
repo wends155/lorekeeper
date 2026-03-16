@@ -6,6 +6,12 @@
 - All technical debt from the initial audit has been remediated.
 - The project is fully functional, lint-compliant, and well-tested.
 
+### [x] Fix: Missing Serde Defaults v0.3.2 (2026-03-16)
+- Fixed `SearchQuery.limit` and `Filters.limit`/`offset` missing `#[serde(default)]`, causing MCP tool failures when clients omit optional pagination params.
+- Added `const fn default_limit()` helper (limit→20, offset→0).
+- Added 2 regression tests (`handle_search_omit_limit`, `handle_by_type_omit_limit_offset`).
+- Affected tools: `lorekeeper_by_type`, `lorekeeper_search`. All other 10 tools were safe.
+
 ### [x] Release v0.3.1 (2026-03-16)
 - Published to crates.io and GitHub Releases.
 - Implemented graceful startup for cases where `LOREKEEPER_ROOT` is not provided.
