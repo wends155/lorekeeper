@@ -7,10 +7,10 @@ Lorekeeper is a Rust MCP (Model Context Protocol) server that provides structure
 ## Key Features
 
 - **Context Window Management:** Reduces per-session token load by allowing selective retrieval.
-- **Typed Entries:** 10 semantic entry types (e.g., `DECISION`, `COMMIT`, `PLAN`, `LESSON`, `TECH_DEBT`).
+- **Typed Entries:** 11 semantic entry types (e.g., `DECISION`, `COMMIT`, `PLAN`, `LESSON`, `SESSION_SUMMARY`).
 - **Role Enforcement:** Mechanically prevents unauthorized writes (e.g., Builder agents cannot assert architectural constraints).
 - **Full-Text Search:** Backed by SQLite FTS5 across titles, bodies, and tags.
-- **Rich Interaction:** 10 MCP tools covering CRUD, search, and memory analytics.
+- **Rich Interaction:** 11 MCP tools covering CRUD, search, and memory analytics.
 - **Isolated Storage:** Automatically manages a project-local SQLite database (`.lorekeeper/memory.db`).
 
 ## Installation
@@ -56,6 +56,7 @@ Lorekeeper provides the following MCP tools for agentic workflows:
 
 - **Write:** `lorekeeper_store`, `lorekeeper_update`, `lorekeeper_delete`
 - **Read:** `lorekeeper_get`, `lorekeeper_search`, `lorekeeper_recent`, `lorekeeper_by_type`, `lorekeeper_render`
+- **Health:** `lorekeeper_reflect` (detects duplicates/staleness)
 - **Meta:** `lorekeeper_stats`, `lorekeeper_help`
 
 Agents can self-discover capabilities by calling `lorekeeper_help`.

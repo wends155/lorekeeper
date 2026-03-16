@@ -1,4 +1,19 @@
-/target/
+# Lorekeeper Specific
 /.lorekeeper/
 /.env
 /.env.local
+
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# Note: Cargo.lock is tracked because this is a standalone binary project, not a library.
+
+# OS Metadata
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
