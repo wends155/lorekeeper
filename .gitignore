@@ -2,6 +2,7 @@
 /.lorekeeper/
 /.env
 /.env.local
+/test_out/
 
 # Rust
 /target/
