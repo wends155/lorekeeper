@@ -6,6 +6,12 @@
 - All technical debt from the initial audit has been remediated.
 - The project is fully functional, lint-compliant, and well-tested.
 
+### [x] Upgrade rust-mcp-sdk to v0.9.0 (2026-03-16)
+- Resolved MCP protocol version mismatch (Antigravity sent `2025-06-18`, SDK v0.8.3 only supported `2025-03-26`).
+- Bumped `rust-mcp-sdk` to `0.9` (supports protocol `2025-11-25` with backward compatibility).
+- Fixed `ToolInputSchema::new` parameter type change (`HashMap` → `BTreeMap`).
+- Reinstalled Lorekeeper binary locally.
+
 ### [x] Crates.io Readiness & Publication Remediation (2026-03-16)
 - Audited project for `cargo publish` readiness and remediated 6 findings.
 - Removed `publish = false`, added required metadata (description, keywords, repository, etc.), and synced `rust-version`.

@@ -139,6 +139,7 @@ async fn main() -> Result<(), LoreError> {
         handler: handler.to_mcp_server_handler(),
         task_store: None,
         client_task_store: None,
+        message_observer: None,
     });
 
     info!("Lorekeeper MCP server starting on stdio...");

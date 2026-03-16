@@ -163,7 +163,7 @@ impl LoreHandler {
         let properties = if props.is_empty() {
             None
         } else {
-            let mut map = HashMap::new();
+            let mut map = std::collections::BTreeMap::new();
             for (k, v) in props {
                 map.insert(k, serde_json::from_value(v).unwrap_or_default());
             }
