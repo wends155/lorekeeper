@@ -77,6 +77,8 @@ mod tests {
             created_at: created,
             updated_at: created,
             is_deleted: false,
+            access_count: 0,
+            last_accessed_at: None,
             data: serde_json::Value::Null,
         }
     }

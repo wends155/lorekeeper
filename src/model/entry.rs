@@ -32,6 +32,10 @@ pub struct Entry {
     pub updated_at: DateTime<Utc>,
     /// Whether the entry is soft-deleted.
     pub is_deleted: bool,
+    /// Number of times this entry has been retrieved via `lorekeeper_get`.
+    pub access_count: u32,
+    /// When this entry was last retrieved via `lorekeeper_get`.
+    pub last_accessed_at: Option<DateTime<Utc>>,
     /// Type-specific structured metadata (variant-dependent).
     pub data: serde_json::Value,
 }

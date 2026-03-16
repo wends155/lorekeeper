@@ -90,6 +90,19 @@ pub fn init_schema(conn: &Connection) -> Result<(), LoreError> {
         tx.execute("INSERT INTO schema_version (version) VALUES (1)", [])?;
     }
 
+    // v2: add access tracking columns
+    let version: i32 = tx
+        .query_row("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap_or(0);
+
+    if version < 2 {
+        tx.execute("ALTER TABLE entry ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0", [])?;
+        tx.execute("ALTER TABLE entry ADD COLUMN last_accessed_at TEXT", [])?;
+        tx.execute("INSERT INTO schema_version (version) VALUES (2)", [])?;
+    }
+
     tx.commit()?;
     Ok(())
 }

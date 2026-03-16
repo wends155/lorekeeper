@@ -1,8 +1,9 @@
 //! `SQLite` implementation of the `EntryRepository`.
 
+use crate::config::LoreConfig;
 use crate::error::LoreError;
 use crate::model::entry::{Entry, NewEntry, UpdateEntry};
-use crate::model::types::EntryType;
+use crate::model::types::{EntryType, ReflectCriteria, ReflectReport, SimilarEntry};
 use crate::model::validation::{
     validate_new_entry, validate_related_entries, validate_state_transition,
 };
@@ -82,13 +83,17 @@ impl EntryRepository for SqliteEntryRepo {
             created_at: now,
             updated_at: now,
             is_deleted: false,
+            access_count: 0,
+            last_accessed_at: None,
             data: input.data.unwrap_or(serde_json::Value::Null),
         })
     }
 
     fn get(&self, id: &str) -> Result<Entry, LoreError> {
         let conn = self.conn.lock().map_err(|e| LoreError::Poison(e.to_string()))?;
-        let mut stmt = conn.prepare("SELECT id, entry_type, title, body, role, tags, related_entries, created_at, updated_at, is_deleted, data FROM entry WHERE id = ?")?;
+        let mut stmt = conn.prepare(
+            "SELECT id, entry_type, title, body, role, tags, related_entries, created_at, updated_at, is_deleted, data, access_count, last_accessed_at FROM entry WHERE id = ?",
+        )?;
 
         let entry = match stmt.query_row(params![id], map_row) {
             Ok(e) => e,
@@ -101,6 +106,14 @@ impl EntryRepository for SqliteEntryRepo {
         if entry.is_deleted {
             return Err(LoreError::NotFound(id.to_owned()));
         }
+
+        // Track deliberate access (only on explicit get, not on searches)
+        let now = Utc::now();
+        conn.execute(
+            "UPDATE entry SET access_count = access_count + 1, last_accessed_at = ? WHERE id = ?",
+            params![now, id],
+        )?;
+
         Ok(entry)
     }
 
@@ -108,7 +121,9 @@ impl EntryRepository for SqliteEntryRepo {
         let conn = self.conn.lock().map_err(|e| LoreError::Poison(e.to_string()))?;
 
         // Get existing to merge
-        let mut stmt = conn.prepare("SELECT id, entry_type, title, body, role, tags, related_entries, created_at, updated_at, is_deleted, data FROM entry WHERE id = ?")?;
+        let mut stmt = conn.prepare(
+            "SELECT id, entry_type, title, body, role, tags, related_entries, created_at, updated_at, is_deleted, data, access_count, last_accessed_at FROM entry WHERE id = ?",
+        )?;
         let existing = match stmt.query_row(params![id], map_row) {
             Ok(e) => e,
             Err(rusqlite::Error::QueryReturnedNoRows) => {
@@ -169,6 +184,8 @@ impl EntryRepository for SqliteEntryRepo {
             created_at: existing.created_at,
             updated_at: now,
             is_deleted: false,
+            access_count: existing.access_count,
+            last_accessed_at: existing.last_accessed_at,
             data,
         })
     }
@@ -212,7 +229,10 @@ impl EntryRepository for SqliteEntryRepo {
 
     fn recent(&self, limit: u32) -> Result<Vec<Entry>, LoreError> {
         let conn = self.conn.lock().map_err(|e| LoreError::Poison(e.to_string()))?;
-        let mut stmt = conn.prepare("SELECT id, entry_type, title, body, role, tags, related_entries, created_at, updated_at, is_deleted, data FROM entry WHERE is_deleted = 0 ORDER BY created_at DESC LIMIT ?")?;
+        let mut stmt = conn.prepare(
+            "SELECT id, entry_type, title, body, role, tags, related_entries, created_at, updated_at, is_deleted, data, access_count, last_accessed_at FROM entry WHERE is_deleted = 0 ORDER BY created_at DESC LIMIT ?",
+        )?;
+
         let rows = stmt.query_map(params![limit], map_row)?;
 
         let mut results = Vec::new();
@@ -225,7 +245,7 @@ impl EntryRepository for SqliteEntryRepo {
     fn by_type(&self, entry_type: EntryType, filters: &Filters) -> Result<Vec<Entry>, LoreError> {
         let conn = self.conn.lock().map_err(|e| LoreError::Poison(e.to_string()))?;
 
-        let mut sql = "SELECT id, entry_type, title, body, role, tags, related_entries, created_at, updated_at, is_deleted, data FROM entry WHERE entry_type = ? AND is_deleted = 0".to_owned();
+        let mut sql = "SELECT id, entry_type, title, body, role, tags, related_entries, created_at, updated_at, is_deleted, data, access_count, last_accessed_at FROM entry WHERE entry_type = ? AND is_deleted = 0".to_owned();
         let type_str = serde_json::to_string(&entry_type).unwrap_or_default().replace('"', "");
         let mut params_vec: Vec<rusqlite::types::Value> = vec![type_str.into()];
 
@@ -289,7 +309,10 @@ impl EntryRepository for SqliteEntryRepo {
 
     fn render_all(&self) -> Result<Vec<Entry>, LoreError> {
         let conn = self.conn.lock().map_err(|e| LoreError::Poison(e.to_string()))?;
-        let mut stmt = conn.prepare("SELECT id, entry_type, title, body, role, tags, related_entries, created_at, updated_at, is_deleted, data FROM entry WHERE is_deleted = 0 ORDER BY entry_type, created_at ASC")?;
+        let mut stmt = conn.prepare(
+            "SELECT id, entry_type, title, body, role, tags, related_entries, created_at, updated_at, is_deleted, data, access_count, last_accessed_at FROM entry WHERE is_deleted = 0 ORDER BY entry_type, created_at ASC",
+        )?;
+
         let rows = stmt.query_map([], map_row)?;
 
         let mut results = Vec::new();
@@ -297,6 +320,286 @@ impl EntryRepository for SqliteEntryRepo {
             results.push(row?);
         }
         Ok(results)
+    }
+
+    fn find_similar(
+        &self,
+        title: &str,
+        body: Option<String>,
+        entry_type: EntryType,
+        threshold: f64,
+    ) -> Result<Vec<SimilarEntry>, LoreError> {
+        let conn = self.conn.lock().map_err(|e| LoreError::Poison(e.to_string()))?;
+
+        // Build query string combining title and body for richer FTS5 matching
+        let query_text = match body.as_deref() {
+            Some(b) if !b.is_empty() => format!("{title} {b}"),
+            _ => title.to_owned(),
+        };
+
+        // Sanitize for FTS5: remove special characters that break the query parser
+        let sanitized: String = query_text
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == ' ' { c } else { ' ' })
+            .collect();
+        let sanitized = sanitized.trim();
+        if sanitized.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let type_str = serde_json::to_string(&entry_type)
+            .map_err(LoreError::Serialization)?
+            .replace('"', "");
+
+        // BM25 score in FTS5 is negative (more negative = more similar)
+        let mut stmt = conn.prepare(
+            "SELECT e.id, e.title, e.entry_type, rank \
+             FROM entry_fts \
+             JOIN entry e ON e.rowid = entry_fts.rowid \
+             WHERE entry_fts MATCH ? AND e.entry_type = ? AND e.is_deleted = 0 \
+             ORDER BY rank \
+             LIMIT 3",
+        )?;
+
+        let rows = stmt.query_map(
+            rusqlite::params![sanitized, type_str],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, f64>(3)?,
+                ))
+            },
+        )?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            let (id, row_title, et, score) = row?;
+            // BM25 scores are negative; convert to positive for comparison
+            let abs_score = score.abs();
+            if abs_score >= threshold {
+                results.push(SimilarEntry { id, title: row_title, entry_type: et, score });
+            }
+        }
+        Ok(results)
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn reflect(
+        &self,
+        criteria: &ReflectCriteria,
+        config: &LoreConfig,
+    ) -> Result<ReflectReport, LoreError> {
+        use crate::model::types::{
+            MemoryState, ReflectFinding, ReflectFocus, ReflectSummary,
+        };
+
+        let conn = self.conn.lock().map_err(|e| LoreError::Poison(e.to_string()))?;
+        let limit = i64::from(criteria.limit.unwrap_or(20));
+
+        // Determine memory state
+        let total_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM entry WHERE is_deleted = 0",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let state = match total_count {
+            0 => MemoryState::Empty,
+            1..=4 => MemoryState::Nascent,
+            5..=99 => MemoryState::Active,
+            _ => MemoryState::Mature,
+        };
+
+        let guidance = match &state {
+            MemoryState::Empty => Some(
+                "No entries yet. Store your first memory with lorekeeper_store to get started.".to_owned(),
+            ),
+            MemoryState::Nascent => Some(
+                "Memory bank is nascent (<5 entries). Results may not be representative yet.".to_owned(),
+            ),
+            _ => None,
+        };
+
+        let stale_days = i64::from(criteria.stale_days.unwrap_or(config.reflect.stale_days));
+        let hot_threshold = i64::from(
+            criteria.min_access_count.unwrap_or(config.reflect.hot_access_threshold),
+        );
+        let dead_days = i64::from(config.reflect.dead_entry_days);
+
+        let mut findings: Vec<ReflectFinding> = Vec::new();
+        let mut summary = ReflectSummary::default();
+
+        let run_stale = matches!(criteria.focus, ReflectFocus::Stale | ReflectFocus::All);
+        let run_dead = matches!(criteria.focus, ReflectFocus::Dead | ReflectFocus::All);
+        let run_hot = matches!(criteria.focus, ReflectFocus::Hot | ReflectFocus::All);
+        let run_orphaned = matches!(criteria.focus, ReflectFocus::Orphaned | ReflectFocus::All);
+        let run_contradictions =
+            matches!(criteria.focus, ReflectFocus::Contradictions | ReflectFocus::All);
+
+        // Stale: entries not updated within stale_days
+        if run_stale {
+            let mut stmt = conn.prepare(
+                "SELECT id, entry_type, title, updated_at FROM entry \
+                 WHERE is_deleted = 0 \
+                 AND CAST(julianday('now') - julianday(updated_at) AS INTEGER) >= ? \
+                 ORDER BY updated_at ASC \
+                 LIMIT ?",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![stale_days, limit], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?;
+            for row in rows {
+                let (id, et, title, updated_at) = row?;
+                summary.stale += 1;
+                findings.push(ReflectFinding {
+                    category: "stale".to_owned(),
+                    entry_id: id,
+                    entry_type: et,
+                    title,
+                    reason: format!("Not updated since {updated_at} (>{stale_days} days)"),
+                });
+            }
+        }
+
+        // Dead: entries with access_count = 0 and older than dead_days
+        if run_dead {
+            let mut stmt = conn.prepare(
+                "SELECT id, entry_type, title, created_at FROM entry \
+                 WHERE is_deleted = 0 AND access_count = 0 \
+                 AND CAST(julianday('now') - julianday(created_at) AS INTEGER) >= ? \
+                 ORDER BY created_at ASC \
+                 LIMIT ?",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![dead_days, limit], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?;
+            for row in rows {
+                let (id, et, title, created_at) = row?;
+                summary.dead += 1;
+                findings.push(ReflectFinding {
+                    category: "dead".to_owned(),
+                    entry_id: id,
+                    entry_type: et,
+                    title,
+                    reason: format!("Never accessed since creation ({created_at})"),
+                });
+            }
+        }
+
+        // Hot: frequently accessed entries (may need review/split)
+        if run_hot {
+            let mut stmt = conn.prepare(
+                "SELECT id, entry_type, title, access_count FROM entry \
+                 WHERE is_deleted = 0 AND access_count >= ? \
+                 ORDER BY access_count DESC \
+                 LIMIT ?",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![hot_threshold, limit], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })?;
+            for row in rows {
+                let (id, et, title, count) = row?;
+                summary.hot += 1;
+                findings.push(ReflectFinding {
+                    category: "hot".to_owned(),
+                    entry_id: id,
+                    entry_type: et,
+                    title,
+                    reason: format!("Accessed {count} times — consider reviewing for freshness"),
+                });
+            }
+        }
+
+        // Orphaned: entries referencing non-existent or deleted related_entries
+        if run_orphaned {
+            let mut stmt = conn.prepare(
+                "SELECT e.id, e.entry_type, e.title, ref.value FROM entry e, \
+                 json_each(e.related_entries) AS ref \
+                 WHERE e.is_deleted = 0 \
+                 AND NOT EXISTS (SELECT 1 FROM entry r WHERE r.id = ref.value AND r.is_deleted = 0) \
+                 LIMIT ?",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![limit], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?;
+            for row in rows {
+                let (id, et, title, broken_ref) = row?;
+                summary.orphaned += 1;
+                findings.push(ReflectFinding {
+                    category: "orphaned".to_owned(),
+                    entry_id: id,
+                    entry_type: et,
+                    title,
+                    reason: format!("Related entry {broken_ref} no longer exists"),
+                });
+            }
+        }
+
+        // Contradictions: same-type entries with high FTS5 similarity
+        if run_contradictions {
+            let mut stmt = conn.prepare(
+                "SELECT a.id, a.entry_type, a.title, b.title FROM entry a \
+                 JOIN entry_fts fa ON fa.rowid = a.rowid \
+                 JOIN entry_fts(fa.title || ' ' || COALESCE(fa.body, '')) fb ON TRUE \
+                 JOIN entry b ON b.rowid = fb.rowid \
+                 WHERE a.is_deleted = 0 AND b.is_deleted = 0 \
+                 AND a.entry_type = b.entry_type \
+                 AND a.id != b.id \
+                 AND fb.rank < -0.5 \
+                 LIMIT ?",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![limit], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?;
+            for row in rows {
+                match row {
+                    Ok((id, et, title, similar_title)) => {
+                        summary.contradictions += 1;
+                        findings.push(ReflectFinding {
+                            category: "contradictions".to_owned(),
+                            entry_id: id,
+                            entry_type: et,
+                            title,
+                            reason: format!("Textually similar to: \"{similar_title}\""),
+                        });
+                    }
+                    Err(_) => {
+                        // FTS5 self-join may not be supported on all SQLite builds; skip silently
+                    }
+                }
+            }
+        }
+
+        summary.total = findings.len();
+
+        Ok(ReflectReport { state, findings, summary, guidance })
     }
 }
 
@@ -316,6 +619,8 @@ fn map_row(row: &Row) -> rusqlite::Result<Entry> {
         created_at: row.get(7)?,
         updated_at: row.get(8)?,
         is_deleted: row.get(9)?,
+        access_count: row.get(11).unwrap_or(0),
+        last_accessed_at: row.get(12).unwrap_or(None),
         data: serde_json::from_str(&data_json).unwrap_or(serde_json::Value::Null),
     })
 }

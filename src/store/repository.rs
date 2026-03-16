@@ -1,8 +1,9 @@
 //! Traits and types for entry storage abstraction.
 
+use crate::config::LoreConfig;
 use crate::error::LoreError;
 use crate::model::entry::{Entry, NewEntry, UpdateEntry};
-use crate::model::types::EntryType;
+use crate::model::types::{EntryType, ReflectCriteria, ReflectReport, SimilarEntry};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -51,7 +52,7 @@ pub trait EntryRepository: Send + Sync {
     /// Returns [`LoreError`] if validation, role enforcement, or database write fails.
     fn store(&self, input: NewEntry) -> Result<Entry, LoreError>;
 
-    /// Retrieves an entry by its ID.
+    /// Retrieves an entry by its ID and increments its access counter.
     ///
     /// # Errors
     ///
@@ -107,4 +108,34 @@ pub trait EntryRepository: Send + Sync {
     ///
     /// Returns [`LoreError`] if the database query fails.
     fn render_all(&self) -> Result<Vec<Entry>, LoreError>;
+
+    /// Analyzes the memory bank and surfaces entries needing attention.
+    ///
+    /// Returns a structured report with findings in the categories indicated by `criteria`.
+    /// Thresholds from `config` serve as defaults when not overridden by `criteria`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LoreError`] if any database query fails.
+    fn reflect(
+        &self,
+        criteria: &ReflectCriteria,
+        config: &LoreConfig,
+    ) -> Result<ReflectReport, LoreError>;
+
+    /// Finds entries similar to the given title and optional body text within the same type.
+    ///
+    /// Uses FTS5 BM25 scoring to detect potential duplicates. Returns at most 3 candidates
+    /// whose score magnitude exceeds `threshold`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LoreError`] if the database query fails.
+    fn find_similar(
+        &self,
+        title: &str,
+        body: Option<String>,
+        entry_type: EntryType,
+        threshold: f64,
+    ) -> Result<Vec<SimilarEntry>, LoreError>;
 }

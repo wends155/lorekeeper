@@ -52,7 +52,7 @@ pub fn validate_update(
 ) -> Result<(), LoreError> {
     use super::types::{
         BuilderNoteData, CommitData, ConstraintData, DeferredData, FeatureData, LessonData,
-        PlanData, StubData, TechDebtData,
+        PlanData, SessionSummaryData, StubData, TechDebtData,
     };
 
     let Some(data) = data else {
@@ -87,6 +87,9 @@ pub fn validate_update(
         }
         EntryType::TechDebt => {
             serde_json::from_value::<TechDebtData>(data.clone())?;
+        }
+        EntryType::SessionSummary => {
+            serde_json::from_value::<SessionSummaryData>(data.clone())?;
         }
     }
 

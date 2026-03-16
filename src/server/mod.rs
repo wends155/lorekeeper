@@ -793,6 +793,8 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             is_deleted: false,
+            access_count: 0,
+            last_accessed_at: None,
             data: serde_json::Value::Null,
         }
     }
