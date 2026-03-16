@@ -1350,7 +1350,10 @@ mod tests {
 
         let mock = MockEntryRepository::new();
         let handler = LoreHandler::with_defaults(Arc::new(mock));
-        assert_eq!(handler.root.read().unwrap().as_ref().unwrap(), &std::path::PathBuf::from("/test"));
+        assert_eq!(
+            handler.root.read().unwrap().as_ref().unwrap(),
+            &std::path::PathBuf::from("/test")
+        );
 
         let params = CallToolRequestParams {
             name: "lorekeeper_set_root".to_owned(),

@@ -3,10 +3,10 @@
 | Field | Value |
 |-------|-------|
 | **Project** | Lorekeeper |
-| **Version** | 1 |
-| **Last Updated** | 2026-03-13 |
+| **Version** | 2 |
+| **Last Updated** | 2026-03-16 |
 
-> Last verified against: `1237020` (2026-03-13, Phases 0-G complete)
+> Last verified against: `3517d69` (2026-03-16, v0.3.1)
 
 ---
 
@@ -186,6 +186,8 @@ THEN the deleted entry is not included in the results
 | `lorekeeper_recent` | `limit?` | JSON Array of `Entry` |
 | `lorekeeper_by_type` | `entry_type`, `status?`, `limit?`, `offset?` | JSON Array of `Entry` |
 | `lorekeeper_stats` | (none) | JSON Object (type counts, last_updated) |
+| `lorekeeper_reflect` | `focus?`, `limit?`, `stale_days?`, `min_access_count?` | JSON Object (stale, dead, hot, orphaned, contradictions) |
+| `lorekeeper_set_root` | `path` | JSON Object `{ status: success, root, entries }` |
 | `lorekeeper_help` | `topic?` | Markdown help text |
 
 ### Behavioral Scenarios
@@ -216,6 +218,26 @@ WHEN any `tracing` event is emitted
 THEN the log output is written to stderr
 AND stdout remains strictly preserved for JSON-RPC JSON payloads
 
+[HAPPY] Set root switches active project
+GIVEN the MCP server is running (with or without a project root)
+WHEN `lorekeeper_set_root` is called with a valid directory path
+THEN the server switches its database to `<path>/.lorekeeper/memory.db`
+AND the response contains `{ status: "success", root: "<path>", entries: N }`
+AND subsequent tool calls operate on the new project's database
+
+[ERROR] Set root with invalid path
+GIVEN the MCP server is running
+WHEN `lorekeeper_set_root` is called with a non-existent directory
+THEN the operation fails with an error indicating the path is invalid
+AND the previously active project root (if any) remains unchanged
+
+[ERROR] No-root guard rejects data-modifying tools
+GIVEN the MCP server started without a project root (in-memory fallback)
+AND `lorekeeper_set_root` has NOT been called
+WHEN any data-modifying tool (e.g. `lorekeeper_store`, `lorekeeper_stats`) is invoked
+THEN the tool call returns an error: "no project root set — call lorekeeper_set_root first"
+AND `lorekeeper_set_root` and `lorekeeper_help` remain functional
+
 ---
 
 ## 5. Database Lifecycle (`db`)
@@ -231,6 +253,15 @@ THEN the `.lorekeeper` directory is created
 AND `memory.db` is initialized
 AND the schema and FTS5 virtual tables are created
 AND `WAL` journaling mode is enabled
+
+[HAPPY] Graceful no-root startup
+GIVEN no `LOREKEEPER_ROOT` environment variable is set
+AND the server's working directory does not contain a `.git` or `.lorekeeper` directory
+WHEN the server starts
+THEN it does NOT crash or exit with an error
+AND it initializes with an in-memory SQLite database
+AND it logs that no project root was found
+AND the no-root guard is active (data-modifying tools are blocked until `lorekeeper_set_root` is called)
 
 [HAPPY] Automatic schema migration
 GIVEN an existing `memory.db` on schema version 1
