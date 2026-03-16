@@ -7,18 +7,21 @@
 //! # Key Types
 //!
 //! - [`model::entry::Entry`] — A stored memory entry.
-//! - [`model::types::EntryType`] — The 10 semantic entry types (DECISION, COMMIT, etc.).
+//! - [`model::types::EntryType`] — The 11 semantic entry types (DECISION, COMMIT, etc.).
 //! - [`store::repository::EntryRepository`] — Trait for entry persistence.
 //! - [`error::LoreError`] — Crate-level error enum.
+//! - [`config::LoreConfig`] — Project-local configuration.
 //!
 //! # Usage
 //!
 //! The server is started via `main.rs` and communicates over stdio using the MCP protocol.
 //! Agents interact with memory through 11 registered tools (store, get, search, etc.).
 
+pub mod config;
 pub mod db;
 pub mod error;
 pub mod model;
 pub mod render;
 pub mod server;
 pub mod store;
+
