@@ -184,10 +184,11 @@ pub enum ReflectFocus {
 }
 
 /// Overall maturity state of the memory bank.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryState {
     /// Zero entries exist.
+    #[default]
     Empty,
     /// Fewer than 5 entries — insufficient data for full analysis.
     Nascent,
@@ -198,7 +199,7 @@ pub enum MemoryState {
 }
 
 /// Input parameters for `lorekeeper_reflect`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ReflectCriteria {
     /// Which category of findings to surface.
     #[serde(default)]
@@ -244,7 +245,7 @@ pub struct ReflectSummary {
 }
 
 /// Complete output of `lorekeeper_reflect`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ReflectReport {
     /// Overall maturity classification of the memory bank.
     pub state: MemoryState,

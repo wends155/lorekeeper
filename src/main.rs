@@ -2,6 +2,7 @@
 //!
 //! This binary provides the standard I/O transport listener for MCP tools.
 
+use lorekeeper::config::LoreConfig;
 use lorekeeper::db::Database;
 use lorekeeper::error::LoreError;
 use lorekeeper::server::LoreHandler;
@@ -58,8 +59,13 @@ async fn main() -> Result<(), LoreError> {
     // Consume the db to extract the connection for the repo
     let repo = Arc::new(SqliteEntryRepo::new(db.into_connection()));
 
-    // 5. Build MCP server
-    let handler = LoreHandler::new(repo);
+    // 5. Load project config (auto-generates defaults if .lorekeeper/config.toml is missing)
+    let config = LoreConfig::load(&lorekeeper_dir);
+    info!("Loaded config: stale_days={}, similarity_threshold={:.2}",
+        config.reflect.stale_days, config.store.similarity_threshold);
+
+    // 6. Build MCP server
+    let handler = LoreHandler::new(repo, config);
 
     let transport = StdioTransport::new(TransportOptions::default())
         .map_err(|e| LoreError::Internal(e.to_string()))?;

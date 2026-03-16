@@ -4,8 +4,9 @@
 //! registering all Lorekeeper tools and dispatching incoming tool calls to the
 //! appropriate repository methods.
 
+use crate::config::LoreConfig;
 use crate::model::entry::{NewEntry, UpdateEntry};
-use crate::model::types::EntryType;
+use crate::model::types::{EntryType, ReflectCriteria};
 use crate::render::render_entries;
 use crate::store::repository::{EntryRepository, Filters, SearchQuery};
 use async_trait::async_trait;
@@ -127,6 +128,7 @@ mod help;
 /// The primary MCP server handler for Lorekeeper tools.
 pub struct LoreHandler {
     repo: Arc<dyn EntryRepository>,
+    config: LoreConfig,
 }
 
 impl std::fmt::Debug for LoreHandler {
@@ -136,13 +138,20 @@ impl std::fmt::Debug for LoreHandler {
 }
 
 impl LoreHandler {
-    /// Creates a new `LoreHandler` with the given repository.
+    /// Creates a new `LoreHandler` with the given repository and project config.
     ///
     /// # Arguments
     ///
     /// * `repo` - A thread-safe reference to an [`EntryRepository`] implementation.
-    pub fn new(repo: Arc<dyn EntryRepository>) -> Self {
-        Self { repo }
+    /// * `config` - The project-local [`LoreConfig`] loaded from `.lorekeeper/config.toml`.
+    pub fn new(repo: Arc<dyn EntryRepository>, config: LoreConfig) -> Self {
+        Self { repo, config }
+    }
+
+    /// Creates a `LoreHandler` with default config. Intended for tests and toolcheck scenarios.
+    #[cfg(test)]
+    pub fn with_defaults(repo: Arc<dyn EntryRepository>) -> Self {
+        Self { repo, config: LoreConfig::default() }
     }
 
     fn make_tool(
@@ -280,6 +289,38 @@ impl LoreHandler {
                 vec!["entry_type".into()],
             ),
             Self::make_tool("lorekeeper_stats", DESC_STATS, HashMap::new(), vec![]),
+            // -- REFLECT TOOL --------------------------------------------------
+            Self::make_tool(
+                "lorekeeper_reflect",
+                "Analyze the memory bank and surface entries needing attention.\n\n\
+                 Returns a JSON report with findings across 5 categories:\n\
+                 - stale: entries not updated beyond the stale_days threshold\n\
+                 - dead: entries with no access since creation\n\
+                 - hot: frequently accessed entries (worth reviewing for freshness)\n\
+                 - orphaned: entries whose related_entries links are broken\n\
+                 - contradictions: textually similar same-type entries (possible duplicates)\n\n\
+                 WHEN TO USE: at session start (toolcheck) or after large batches of changes.",
+                HashMap::from([
+                    ("focus".into(), json!({
+                        "type": "string",
+                        "description": "Which finding category to surface. Omit for all.",
+                        "enum": ["stale", "dead", "hot", "orphaned", "contradictions", "all"]
+                    })),
+                    ("stale_days".into(), json!({
+                        "type": "integer",
+                        "description": "Override config stale_days threshold for this call."
+                    })),
+                    ("min_access_count".into(), json!({
+                        "type": "integer",
+                        "description": "Override config hot_access_threshold for this call."
+                    })),
+                    ("limit".into(), json!({
+                        "type": "integer",
+                        "description": "Maximum number of findings to return. Default: 20."
+                    })),
+                ]),
+                vec![],
+            ),
             // -- HELP TOOL ----------------------------------------------------
             Self::make_tool(
                 "lorekeeper_help",
@@ -289,7 +330,8 @@ impl LoreHandler {
                     "description": "Help topic. Omit for overview.",
                     "enum": ["overview","workflow","roles","tools",
                              "DECISION","COMMIT","CONSTRAINT","LESSON","PLAN",
-                             "FEATURE","STUB","DEFERRED","BUILDER_NOTE","TECH_DEBT"]
+                             "FEATURE","STUB","DEFERRED","BUILDER_NOTE","TECH_DEBT",
+                             "SESSION_SUMMARY"]
                 }))]),
                 vec![],
             ),
@@ -308,12 +350,31 @@ impl LoreHandler {
             "lorekeeper_store" => {
                 let input: NewEntry =
                     serde_json::from_value(args_value).map_err(|e| e.to_string())?;
+                let title = input.title.clone();
+                let body = input.body.clone();
+                let entry_type = input.entry_type;
                 let entry = self.repo.store(input).map_err(|e| {
                     warn!(error = %e, "lorekeeper_store rejected");
                     e.to_string()
                 })?;
                 info!(id = %entry.id.0, "entry stored");
-                Ok(json!({ "status": "success", "id": entry.id.0 }))
+
+                // Duplicate detection: find similar entries in the same type
+                let threshold = self.config.store.similarity_threshold;
+                let similar = self.repo
+                    .find_similar(&title, body, entry_type, threshold)
+                    .unwrap_or_default();
+
+                if similar.is_empty() {
+                    Ok(json!({ "status": "success", "id": entry.id.0 }))
+                } else {
+                    Ok(json!({
+                        "status": "success",
+                        "id": entry.id.0,
+                        "similar_entries": similar,
+                        "warning": "Potential duplicates detected — review similar_entries"
+                    }))
+                }
             }
             "lorekeeper_update" => {
                 let id = args.get("id").and_then(|v| v.as_str()).ok_or("missing id")?;
@@ -391,6 +452,20 @@ impl LoreHandler {
                     e.to_string()
                 })?;
                 serde_json::to_value(stats).map_err(|e| e.to_string())
+            }
+            "lorekeeper_reflect" => {
+                let criteria: ReflectCriteria =
+                    serde_json::from_value(args_value).unwrap_or_default();
+                let report = self.repo.reflect(&criteria, &self.config).map_err(|e| {
+                    error!(error = %e, "lorekeeper_reflect: analysis failed");
+                    e.to_string()
+                })?;
+                info!(
+                    state = ?report.state,
+                    findings = report.summary.total,
+                    "reflect analysis complete"
+                );
+                serde_json::to_value(report).map_err(|e| e.to_string())
             }
             "lorekeeper_help" => {
                 let topic = args.get("topic").and_then(|v| v.as_str()).unwrap_or("overview");
@@ -548,7 +623,7 @@ mod tests {
     #[test]
     fn handle_store_malformed_json() {
         let mock = MockEntryRepository::new();
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_store".to_owned(),
             arguments: Some(to_map(&json!({ "entry_type": 123 }))),
@@ -563,7 +638,7 @@ mod tests {
     #[test]
     fn handle_get_missing_id() {
         let mock = MockEntryRepository::new();
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_get".to_owned(),
             arguments: Some(Map::new()),
@@ -577,7 +652,7 @@ mod tests {
     #[test]
     fn handle_delete_missing_id() {
         let mock = MockEntryRepository::new();
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_delete".to_owned(),
             arguments: Some(Map::new()),
@@ -591,7 +666,7 @@ mod tests {
     #[test]
     fn handle_by_type_missing_entry_type() {
         let mock = MockEntryRepository::new();
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_by_type".to_owned(),
             arguments: Some(Map::new()),
@@ -605,7 +680,7 @@ mod tests {
     #[test]
     fn handle_by_type_invalid_entry_type() {
         let mock = MockEntryRepository::new();
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_by_type".to_owned(),
             arguments: Some(to_map(&json!({ "entry_type": "INVALID" }))),
@@ -621,7 +696,7 @@ mod tests {
     fn handle_render_repo_error() {
         let mut mock = MockEntryRepository::new();
         mock.expect_render_all().times(1).returning(|| Err(LoreError::Internal("db down".into())));
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_render".to_owned(),
             arguments: None,
@@ -636,7 +711,7 @@ mod tests {
     fn handle_search_repo_error() {
         let mut mock = MockEntryRepository::new();
         mock.expect_search().times(1).returning(|_| Err(LoreError::Internal("db down".into())));
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_search".to_owned(),
             arguments: Some(to_map(&json!({ "query": "test", "limit": 10 }))),
@@ -652,7 +727,7 @@ mod tests {
     fn handle_recent_repo_error() {
         let mut mock = MockEntryRepository::new();
         mock.expect_recent().times(1).returning(|_| Err(LoreError::Internal("db down".into())));
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_recent".to_owned(),
             arguments: None,
@@ -667,7 +742,7 @@ mod tests {
     fn handle_stats_repo_error() {
         let mut mock = MockEntryRepository::new();
         mock.expect_stats().times(1).returning(|| Err(LoreError::Internal("db down".into())));
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_stats".to_owned(),
             arguments: None,
@@ -681,14 +756,14 @@ mod tests {
     #[tokio::test]
     async fn handle_request_list_tools() {
         let mock = MockEntryRepository::new();
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let request =
             RequestFromClient::ListToolsRequest(serde_json::from_value(json!({})).unwrap());
 
         let result = handler.handle_request(request, Arc::new(NoOpMcpServer)).await;
         if let Ok(ResultFromServer::ListToolsResult(res)) = result {
             let ListToolsResult { tools, .. } = res;
-            assert_eq!(tools.len(), 10);
+            assert_eq!(tools.len(), 11);
         } else {
             panic!("expected ListToolsResult, got {result:?}");
         }
@@ -702,7 +777,7 @@ mod tests {
             Ok(MemoryStats { total: 42, by_type: vec![], by_status: vec![], last_updated: None })
         });
 
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_stats".to_owned(),
             arguments: None,
@@ -723,7 +798,7 @@ mod tests {
     #[tokio::test]
     async fn handle_request_call_tool_err() {
         let mock = MockEntryRepository::new();
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "unknown_tool".to_owned(),
             arguments: None,
@@ -743,7 +818,7 @@ mod tests {
     #[tokio::test]
     async fn handle_request_unknown_method() {
         let mock = MockEntryRepository::new();
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let result = handler
             .handle_request(
                 RequestFromClient::InitializeRequest(
@@ -764,7 +839,7 @@ mod tests {
     #[tokio::test]
     async fn handle_notification_returns_ok() {
         let mock = MockEntryRepository::new();
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let note = NotificationFromClient::InitializedNotification(
             serde_json::from_value(json!({})).unwrap(),
         );
@@ -775,7 +850,7 @@ mod tests {
     #[tokio::test]
     async fn handle_error_returns_ok() {
         let mock = MockEntryRepository::new();
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let err = RpcError::internal_error();
         let result = handler.handle_error(&err, Arc::new(NoOpMcpServer)).await;
         assert!(result.is_ok());
@@ -803,8 +878,9 @@ mod tests {
     fn handle_store_success() -> Result<(), String> {
         let mut mock = MockEntryRepository::new();
         mock.expect_store().times(1).returning(|_| Ok(test_entry("uuid1")));
+        mock.expect_find_similar().times(1).returning(|_, _, _, _| Ok(vec![]));
 
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_store".to_owned(),
             arguments: Some(to_map(&json!({
@@ -829,7 +905,7 @@ mod tests {
             .times(1)
             .returning(|_| Err(LoreError::Validation("missing title".into())));
 
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_store".to_owned(),
             arguments: Some(to_map(&json!({
@@ -857,7 +933,7 @@ mod tests {
             if id == "id1" { Ok(test_entry("id1")) } else { Err(LoreError::NotFound(id.into())) }
         });
 
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_get".to_owned(),
             arguments: Some(to_map(&json!({ "id": "id1" }))),
@@ -876,7 +952,7 @@ mod tests {
         let mut mock = MockEntryRepository::new();
         mock.expect_get().times(1).returning(|id| Err(LoreError::NotFound(id.into())));
 
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_get".to_owned(),
             arguments: Some(to_map(&json!({ "id": "missing" }))),
@@ -896,7 +972,7 @@ mod tests {
     #[test]
     fn handle_unknown_tool() -> Result<(), String> {
         let mock = MockEntryRepository::new();
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "unknown_tool".to_owned(),
             arguments: None,
@@ -918,7 +994,7 @@ mod tests {
         let mut mock = MockEntryRepository::new();
         mock.expect_update().times(1).returning(|id, _| Ok(test_entry(id)));
 
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_update".to_owned(),
             arguments: Some(to_map(&json!({ "id": "id1", "title": "Updated" }))),
@@ -937,7 +1013,7 @@ mod tests {
         let mut mock = MockEntryRepository::new();
         mock.expect_update().times(1).returning(|id, _| Err(LoreError::NotFound(id.into())));
 
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_update".to_owned(),
             arguments: Some(to_map(&json!({ "id": "missing", "title": "X" }))),
@@ -958,7 +1034,7 @@ mod tests {
     #[test]
     fn handle_update_missing_id() -> Result<(), String> {
         let mock = MockEntryRepository::new();
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_update".to_owned(),
             arguments: Some(to_map(&json!({ "title": "No ID" }))),
@@ -981,7 +1057,7 @@ mod tests {
         let mut mock = MockEntryRepository::new();
         mock.expect_delete().times(1).returning(|_| Ok(()));
 
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_delete".to_owned(),
             arguments: Some(to_map(&json!({ "id": "id1" }))),
@@ -999,7 +1075,7 @@ mod tests {
         let mut mock = MockEntryRepository::new();
         mock.expect_delete().times(1).returning(|id| Err(LoreError::NotFound(id.into())));
 
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_delete".to_owned(),
             arguments: Some(to_map(&json!({ "id": "missing" }))),
@@ -1022,7 +1098,7 @@ mod tests {
         let mut mock = MockEntryRepository::new();
         mock.expect_render_all().times(1).returning(|| Ok(vec![test_entry("id1")]));
 
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_render".to_owned(),
             arguments: None,
@@ -1042,7 +1118,7 @@ mod tests {
         let mut mock = MockEntryRepository::new();
         mock.expect_search().times(1).returning(|_| Ok(vec![test_entry("s1")]));
 
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_search".to_owned(),
             arguments: Some(to_map(&json!({ "query": "test", "limit": 10 }))),
@@ -1062,7 +1138,7 @@ mod tests {
         let mut mock = MockEntryRepository::new();
         mock.expect_recent().times(1).returning(|_| Ok(vec![test_entry("r1")]));
 
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_recent".to_owned(),
             arguments: Some(to_map(&json!({ "limit": 5 }))),
@@ -1082,7 +1158,7 @@ mod tests {
         let mut mock = MockEntryRepository::new();
         mock.expect_recent().withf(|limit| *limit == 10).times(1).returning(|_| Ok(vec![]));
 
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_recent".to_owned(),
             arguments: None,
@@ -1100,7 +1176,7 @@ mod tests {
         let mut mock = MockEntryRepository::new();
         mock.expect_by_type().times(1).returning(|_, _| Ok(vec![test_entry("bt1")]));
 
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_by_type".to_owned(),
             arguments: Some(to_map(&json!({
@@ -1128,7 +1204,7 @@ mod tests {
             Ok(MemoryStats { total: 42, by_type: vec![], by_status: vec![], last_updated: None })
         });
 
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_stats".to_owned(),
             arguments: None,
@@ -1144,7 +1220,7 @@ mod tests {
     #[test]
     fn handle_help_success() -> Result<(), String> {
         let mock = MockEntryRepository::new();
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_help".to_owned(),
             arguments: Some(to_map(&json!({ "topic": "roles" }))),
@@ -1161,7 +1237,7 @@ mod tests {
     #[test]
     fn handle_help_default_topic() -> Result<(), String> {
         let mock = MockEntryRepository::new();
-        let handler = LoreHandler::new(Arc::new(mock));
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_help".to_owned(),
             arguments: None,
