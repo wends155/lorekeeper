@@ -65,9 +65,9 @@ context window consumption.
 |:---------------------|:-----------------------------------|
 | **Language**         | Rust                               |
 | **Edition**          | 2024                               |
-| **Rust Version**     | 1.93.1+ (stable)                  |
+| **Rust Version**     | 1.94.0+ (stable)                  |
 | **Async Runtime**    | Tokio (required by `rust-mcp-sdk`) |
-| **MSRV**             | 1.85.0 (Edition 2024 minimum)     |
+| **MSRV**             | 1.94.0 (Edition 2024)             |
 | **Target Platform**  | Windows x86_64 (primary), Linux x86_64 (secondary) |
 
 ---
@@ -321,7 +321,7 @@ Default: `info`. Parsed by `EnvFilter` at startup.
 
 | Crate                | Purpose                               | Feature Flags     |
 |:---------------------|:--------------------------------------|:------------------|
-| `rust-mcp-sdk`       | MCP protocol (server, stdio transport)| —                 |
+| `rust-mcp-sdk`       | MCP protocol (server, stdio transport)| `server`          |
 | `rusqlite`           | SQLite access                         | `bundled`         |
 | `uuid`               | UUID v7 generation                    | `v7`              |
 | `serde`              | Serialization framework               | `derive`          |

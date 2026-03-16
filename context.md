@@ -6,6 +6,12 @@
 - All technical debt from the initial audit has been remediated.
 - The project is fully functional, lint-compliant, and well-tested.
 
+### [x] Release v0.2.0 (2026-03-16)
+- Upgraded `rust-mcp-sdk` from `0.8.3` → `0.9.0` for MCP protocol `2025-06-18`/`2025-11-25` compatibility.
+- Added `InitializeRequest`/`PingRequest` handlers to `ServerHandlerCore` (v0.9.0 dispatch change).
+- Synced MSRV to `1.94.0` across README, architecture.md, and Cargo.toml.
+- Updated MCP config examples with `LOREKEEPER_ROOT` environment variable documentation.
+
 ### [x] Upgrade rust-mcp-sdk to v0.9.0 (2026-03-16)
 - Resolved MCP protocol version mismatch (Antigravity sent `2025-06-18`, SDK v0.8.3 only supported `2025-03-26`).
 - Bumped `rust-mcp-sdk` to `0.9` (supports protocol `2025-11-25` with backward compatibility).

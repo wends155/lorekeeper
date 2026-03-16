@@ -829,10 +829,7 @@ mod tests {
         let mock = MockEntryRepository::new();
         let handler = LoreHandler::with_defaults(Arc::new(mock));
         let result = handler
-            .handle_request(
-                RequestFromClient::ListResourcesRequest(None),
-                Arc::new(NoOpMcpServer),
-            )
+            .handle_request(RequestFromClient::ListResourcesRequest(None), Arc::new(NoOpMcpServer))
             .await;
 
         assert!(result.is_err());

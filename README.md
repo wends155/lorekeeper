@@ -19,7 +19,7 @@ Lorekeeper is a Rust MCP (Model Context Protocol) server that provides structure
 
 ### From Source
 
-Requires Rust 1.85.0+ (Edition 2024).
+Requires Rust 1.94.0+ (Edition 2024).
 
 ```sh
 # Clone the repository
@@ -33,11 +33,16 @@ just install
 To use Lorekeeper with MCP-compatible clients, add the server to your configuration. 
 Since `cargo install` places the binary in `~/.cargo/bin/`, which should be on your PATH, you can usually use the bare command. If it fails to spawn, use the absolute path to `lorekeeper.exe`.
 
+> **Note:** Set `LOREKEEPER_ROOT` to the project directory if the server isn't launched from within a project that contains a `.git/` or `.lorekeeper/` directory.
+
 **Antigravity (`mcp_config.json`):**
 ```json
 "lorekeeper": {
   "command": "lorekeeper",
-  "args": []
+  "args": [],
+  "env": {
+    "LOREKEEPER_ROOT": "/path/to/your/project"
+  }
 }
 ```
 
@@ -46,7 +51,10 @@ Since `cargo install` places the binary in `~/.cargo/bin/`, which should be on y
 {
   "mcpServers": {
     "lorekeeper": {
-      "command": "lorekeeper"
+      "command": "lorekeeper",
+      "env": {
+        "LOREKEEPER_ROOT": "/path/to/your/project"
+      }
     }
   }
 }
