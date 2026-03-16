@@ -334,4 +334,16 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), LoreError::Validation(_)));
     }
+
+    #[test]
+    fn state_transition_same_status_is_noop() {
+        assert!(
+            validate_state_transition(EntryType::Plan, Some("planned"), Some("planned")).is_ok()
+        );
+    }
+
+    #[test]
+    fn state_transition_other_type_ignores_status() {
+        assert!(validate_state_transition(EntryType::Decision, Some("foo"), Some("bar")).is_ok());
+    }
 }

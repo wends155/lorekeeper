@@ -466,12 +466,320 @@ impl ServerHandlerCore for LoreHandler {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::panic, clippy::str_to_string, clippy::unimplemented)]
     use super::*;
     use crate::error::LoreError;
     use crate::model::entry::{Entry, EntryId};
     use crate::store::repository::MockEntryRepository;
+    use async_trait::async_trait;
     use chrono::Utc;
-    use serde_json::json;
+    use rust_mcp_sdk::schema::CallToolRequestParams;
+    use serde_json::{Map, Value, json};
+    use std::sync::Arc;
+
+    /// Helper to convert json! object to Map<String, Value>
+    fn to_map(v: &Value) -> Map<String, Value> {
+        v.as_object().unwrap().to_owned()
+    }
+
+    struct NoOpMcpServer;
+
+    #[async_trait]
+    impl McpServer for NoOpMcpServer {
+        async fn start(self: Arc<Self>) -> rust_mcp_sdk::error::SdkResult<()> {
+            unimplemented!("test stub")
+        }
+        async fn set_client_details(
+            &self,
+            _: rust_mcp_sdk::schema::InitializeRequestParams,
+        ) -> rust_mcp_sdk::error::SdkResult<()> {
+            unimplemented!("test stub")
+        }
+        fn server_info(&self) -> &rust_mcp_sdk::schema::InitializeResult {
+            unimplemented!("test stub")
+        }
+        fn client_info(&self) -> Option<rust_mcp_sdk::schema::InitializeRequestParams> {
+            unimplemented!("test stub")
+        }
+        async fn auth_info(
+            &self,
+        ) -> tokio::sync::RwLockReadGuard<'_, Option<rust_mcp_sdk::auth::AuthInfo>> {
+            unimplemented!("test stub")
+        }
+        async fn auth_info_cloned(&self) -> Option<rust_mcp_sdk::auth::AuthInfo> {
+            unimplemented!("test stub")
+        }
+        async fn update_auth_info(&self, _: Option<rust_mcp_sdk::auth::AuthInfo>) {
+            unimplemented!("test stub")
+        }
+        async fn wait_for_initialization(&self) {
+            unimplemented!("test stub")
+        }
+        fn task_store(&self) -> Option<Arc<rust_mcp_sdk::task_store::ServerTaskStore>> {
+            None
+        }
+        fn client_task_store(&self) -> Option<Arc<rust_mcp_sdk::task_store::ClientTaskStore>> {
+            None
+        }
+        async fn stderr_message(&self, _: String) -> rust_mcp_sdk::error::SdkResult<()> {
+            Ok(())
+        }
+        fn session_id(&self) -> Option<rust_mcp_sdk::SessionId> {
+            None
+        }
+        async fn send(
+            &self,
+            _: rust_mcp_sdk::schema::MessageFromServer,
+            _: Option<rust_mcp_sdk::schema::RequestId>,
+            _: Option<std::time::Duration>,
+        ) -> rust_mcp_sdk::error::SdkResult<Option<rust_mcp_sdk::schema::ClientMessage>> {
+            unimplemented!("test stub")
+        }
+        async fn send_batch(
+            &self,
+            _: Vec<rust_mcp_sdk::schema::ServerMessage>,
+            _: Option<std::time::Duration>,
+        ) -> rust_mcp_sdk::error::SdkResult<Option<Vec<rust_mcp_sdk::schema::ClientMessage>>>
+        {
+            unimplemented!("test stub")
+        }
+    }
+
+    #[test]
+    fn handle_store_malformed_json() {
+        let mock = MockEntryRepository::new();
+        let handler = LoreHandler::new(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "lorekeeper_store".to_owned(),
+            arguments: Some(to_map(&json!({ "entry_type": 123 }))),
+            meta: None,
+            task: None,
+        };
+        let result = handler.handle_tool_call(params);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("invalid type: integer `123`"));
+    }
+
+    #[test]
+    fn handle_get_missing_id() {
+        let mock = MockEntryRepository::new();
+        let handler = LoreHandler::new(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "lorekeeper_get".to_owned(),
+            arguments: Some(Map::new()),
+            meta: None,
+            task: None,
+        };
+        let result = handler.handle_tool_call(params);
+        assert_eq!(result.unwrap_err(), "missing id");
+    }
+
+    #[test]
+    fn handle_delete_missing_id() {
+        let mock = MockEntryRepository::new();
+        let handler = LoreHandler::new(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "lorekeeper_delete".to_owned(),
+            arguments: Some(Map::new()),
+            meta: None,
+            task: None,
+        };
+        let result = handler.handle_tool_call(params);
+        assert_eq!(result.unwrap_err(), "missing id");
+    }
+
+    #[test]
+    fn handle_by_type_missing_entry_type() {
+        let mock = MockEntryRepository::new();
+        let handler = LoreHandler::new(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "lorekeeper_by_type".to_owned(),
+            arguments: Some(Map::new()),
+            meta: None,
+            task: None,
+        };
+        let result = handler.handle_tool_call(params);
+        assert_eq!(result.unwrap_err(), "missing entry_type");
+    }
+
+    #[test]
+    fn handle_by_type_invalid_entry_type() {
+        let mock = MockEntryRepository::new();
+        let handler = LoreHandler::new(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "lorekeeper_by_type".to_owned(),
+            arguments: Some(to_map(&json!({ "entry_type": "INVALID" }))),
+            meta: None,
+            task: None,
+        };
+        let result = handler.handle_tool_call(params);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unknown variant `INVALID`"));
+    }
+
+    #[test]
+    fn handle_render_repo_error() {
+        let mut mock = MockEntryRepository::new();
+        mock.expect_render_all().times(1).returning(|| Err(LoreError::Internal("db down".into())));
+        let handler = LoreHandler::new(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "lorekeeper_render".to_owned(),
+            arguments: None,
+            meta: None,
+            task: None,
+        };
+        let result = handler.handle_tool_call(params);
+        assert!(result.unwrap_err().contains("db down"));
+    }
+
+    #[test]
+    fn handle_search_repo_error() {
+        let mut mock = MockEntryRepository::new();
+        mock.expect_search().times(1).returning(|_| Err(LoreError::Internal("db down".into())));
+        let handler = LoreHandler::new(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "lorekeeper_search".to_owned(),
+            arguments: Some(to_map(&json!({ "query": "test", "limit": 10 }))),
+            meta: None,
+            task: None,
+        };
+        let result = handler.handle_tool_call(params);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("db down"));
+    }
+
+    #[test]
+    fn handle_recent_repo_error() {
+        let mut mock = MockEntryRepository::new();
+        mock.expect_recent().times(1).returning(|_| Err(LoreError::Internal("db down".into())));
+        let handler = LoreHandler::new(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "lorekeeper_recent".to_owned(),
+            arguments: None,
+            meta: None,
+            task: None,
+        };
+        let result = handler.handle_tool_call(params);
+        assert!(result.unwrap_err().contains("db down"));
+    }
+
+    #[test]
+    fn handle_stats_repo_error() {
+        let mut mock = MockEntryRepository::new();
+        mock.expect_stats().times(1).returning(|| Err(LoreError::Internal("db down".into())));
+        let handler = LoreHandler::new(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "lorekeeper_stats".to_owned(),
+            arguments: None,
+            meta: None,
+            task: None,
+        };
+        let result = handler.handle_tool_call(params);
+        assert!(result.unwrap_err().contains("db down"));
+    }
+
+    #[tokio::test]
+    async fn handle_request_list_tools() {
+        let mock = MockEntryRepository::new();
+        let handler = LoreHandler::new(Arc::new(mock));
+        let request =
+            RequestFromClient::ListToolsRequest(serde_json::from_value(json!({})).unwrap());
+
+        let result = handler.handle_request(request, Arc::new(NoOpMcpServer)).await;
+        if let Ok(ResultFromServer::ListToolsResult(res)) = result {
+            let ListToolsResult { tools, .. } = res;
+            assert_eq!(tools.len(), 10);
+        } else {
+            panic!("expected ListToolsResult, got {result:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_request_call_tool_ok() {
+        use crate::store::repository::MemoryStats;
+        let mut mock = MockEntryRepository::new();
+        mock.expect_stats().times(1).returning(|| {
+            Ok(MemoryStats { total: 42, by_type: vec![], by_status: vec![], last_updated: None })
+        });
+
+        let handler = LoreHandler::new(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "lorekeeper_stats".to_owned(),
+            arguments: None,
+            meta: None,
+            task: None,
+        };
+        let request = RequestFromClient::CallToolRequest(params);
+
+        let result = handler.handle_request(request, Arc::new(NoOpMcpServer)).await;
+        if let Ok(ResultFromServer::CallToolResult(res)) = result {
+            assert!(res.is_error.is_none());
+            assert!(serde_json::to_string(&res.content).unwrap().contains("42"));
+        } else {
+            panic!("expected CallToolResult, got {result:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_request_call_tool_err() {
+        let mock = MockEntryRepository::new();
+        let handler = LoreHandler::new(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "unknown_tool".to_owned(),
+            arguments: None,
+            meta: None,
+            task: None,
+        };
+        let request = RequestFromClient::CallToolRequest(params);
+
+        let result = handler.handle_request(request, Arc::new(NoOpMcpServer)).await;
+        if let Ok(ResultFromServer::CallToolResult(res)) = result {
+            assert_eq!(res.is_error, Some(true));
+        } else {
+            panic!("expected CallToolResult, got {result:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_request_unknown_method() {
+        let mock = MockEntryRepository::new();
+        let handler = LoreHandler::new(Arc::new(mock));
+        let result = handler
+            .handle_request(
+                RequestFromClient::InitializeRequest(
+                    serde_json::from_value(json!({
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": { "name": "test", "version": "1.0" }
+                    }))
+                    .unwrap(),
+                ),
+                Arc::new(NoOpMcpServer),
+            )
+            .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn handle_notification_returns_ok() {
+        let mock = MockEntryRepository::new();
+        let handler = LoreHandler::new(Arc::new(mock));
+        let note = NotificationFromClient::InitializedNotification(
+            serde_json::from_value(json!({})).unwrap(),
+        );
+        let result = handler.handle_notification(note, Arc::new(NoOpMcpServer)).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn handle_error_returns_ok() {
+        let mock = MockEntryRepository::new();
+        let handler = LoreHandler::new(Arc::new(mock));
+        let err = RpcError::internal_error();
+        let result = handler.handle_error(&err, Arc::new(NoOpMcpServer)).await;
+        assert!(result.is_ok());
+    }
 
     fn test_entry(id: &str) -> Entry {
         Entry {
@@ -489,13 +797,6 @@ mod tests {
         }
     }
 
-    fn to_map(val: Value) -> serde_json::Map<String, Value> {
-        match val {
-            Value::Object(map) => map,
-            _ => serde_json::Map::new(),
-        }
-    }
-
     #[test]
     fn handle_store_success() -> Result<(), String> {
         let mut mock = MockEntryRepository::new();
@@ -504,7 +805,7 @@ mod tests {
         let handler = LoreHandler::new(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_store".to_owned(),
-            arguments: Some(to_map(json!({
+            arguments: Some(to_map(&json!({
                 "entry_type": "DECISION",
                 "role": "architect",
                 "title": "New Decision"
@@ -529,7 +830,7 @@ mod tests {
         let handler = LoreHandler::new(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_store".to_owned(),
-            arguments: Some(to_map(json!({
+            arguments: Some(to_map(&json!({
                 "entry_type": "DECISION",
                 "role": "architect",
                 "title": ""
@@ -557,7 +858,7 @@ mod tests {
         let handler = LoreHandler::new(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_get".to_owned(),
-            arguments: Some(to_map(json!({ "id": "id1" }))),
+            arguments: Some(to_map(&json!({ "id": "id1" }))),
             meta: None,
             task: None,
         };
@@ -576,7 +877,7 @@ mod tests {
         let handler = LoreHandler::new(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_get".to_owned(),
-            arguments: Some(to_map(json!({ "id": "missing" }))),
+            arguments: Some(to_map(&json!({ "id": "missing" }))),
             meta: None,
             task: None,
         };
@@ -618,7 +919,7 @@ mod tests {
         let handler = LoreHandler::new(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_update".to_owned(),
-            arguments: Some(to_map(json!({ "id": "id1", "title": "Updated" }))),
+            arguments: Some(to_map(&json!({ "id": "id1", "title": "Updated" }))),
             meta: None,
             task: None,
         };
@@ -637,7 +938,7 @@ mod tests {
         let handler = LoreHandler::new(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_update".to_owned(),
-            arguments: Some(to_map(json!({ "id": "missing", "title": "X" }))),
+            arguments: Some(to_map(&json!({ "id": "missing", "title": "X" }))),
             meta: None,
             task: None,
         };
@@ -658,7 +959,7 @@ mod tests {
         let handler = LoreHandler::new(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_update".to_owned(),
-            arguments: Some(to_map(json!({ "title": "No ID" }))),
+            arguments: Some(to_map(&json!({ "title": "No ID" }))),
             meta: None,
             task: None,
         };
@@ -681,7 +982,7 @@ mod tests {
         let handler = LoreHandler::new(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_delete".to_owned(),
-            arguments: Some(to_map(json!({ "id": "id1" }))),
+            arguments: Some(to_map(&json!({ "id": "id1" }))),
             meta: None,
             task: None,
         };
@@ -699,7 +1000,7 @@ mod tests {
         let handler = LoreHandler::new(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_delete".to_owned(),
-            arguments: Some(to_map(json!({ "id": "missing" }))),
+            arguments: Some(to_map(&json!({ "id": "missing" }))),
             meta: None,
             task: None,
         };
@@ -742,7 +1043,7 @@ mod tests {
         let handler = LoreHandler::new(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_search".to_owned(),
-            arguments: Some(to_map(json!({ "query": "test", "limit": 10 }))),
+            arguments: Some(to_map(&json!({ "query": "test", "limit": 10 }))),
             meta: None,
             task: None,
         };
@@ -762,7 +1063,7 @@ mod tests {
         let handler = LoreHandler::new(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_recent".to_owned(),
-            arguments: Some(to_map(json!({ "limit": 5 }))),
+            arguments: Some(to_map(&json!({ "limit": 5 }))),
             meta: None,
             task: None,
         };
@@ -800,7 +1101,7 @@ mod tests {
         let handler = LoreHandler::new(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_by_type".to_owned(),
-            arguments: Some(to_map(json!({
+            arguments: Some(to_map(&json!({
                 "entry_type": "DECISION",
                 "limit": 10,
                 "offset": 0
@@ -844,7 +1145,7 @@ mod tests {
         let handler = LoreHandler::new(Arc::new(mock));
         let params = CallToolRequestParams {
             name: "lorekeeper_help".to_owned(),
-            arguments: Some(to_map(json!({ "topic": "roles" }))),
+            arguments: Some(to_map(&json!({ "topic": "roles" }))),
             meta: None,
             task: None,
         };

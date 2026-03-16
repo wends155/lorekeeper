@@ -120,4 +120,21 @@ mod tests {
         assert!(result.contains("\"status\": \"planned\""));
         assert!(result.contains("```json"));
     }
+
+    #[test]
+    fn render_entry_with_tags_shows_tags_line() {
+        let entry = test_entry("id1", EntryType::Decision, "Title 1", 0);
+        let entries = vec![entry];
+        let result = render_entries(&entries);
+        assert!(result.contains("- **Tags:** tag1"));
+    }
+
+    #[test]
+    fn render_entry_without_tags_omits_tags_line() {
+        let mut entry = test_entry("id1", EntryType::Decision, "Title 1", 0);
+        entry.tags = vec![];
+        let entries = vec![entry];
+        let result = render_entries(&entries);
+        assert!(!result.contains("- **Tags:**"));
+    }
 }

@@ -153,4 +153,22 @@ mod tests {
         assert!(result.contains("Unknown topic"));
         assert!(result.contains("Valid topics"));
     }
+
+    #[test]
+    fn get_help_covers_all_individual_topics() {
+        let topics = vec![
+            "DECISION",
+            "COMMIT",
+            "CONSTRAINT",
+            "LESSON",
+            "FEATURE",
+            "DEFERRED",
+            "BUILDER_NOTE",
+            "TECH_DEBT",
+        ];
+        for topic in topics {
+            let result = get_help(topic);
+            assert!(result.contains(topic), "Topic {topic} missing its header");
+        }
+    }
 }

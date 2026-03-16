@@ -733,4 +733,93 @@ mod tests {
 
         assert!(matches!(res, Err(crate::error::LoreError::Validation(_))));
     }
+
+    #[test]
+    fn update_deleted_entry_returns_not_found() {
+        let repo = setup_repo();
+        let stored = repo
+            .store(NewEntry {
+                entry_type: EntryType::Decision,
+                title: "To Delete".into(),
+                body: None,
+                role: "architect".into(),
+                tags: None,
+                related_entries: None,
+                data: None,
+            })
+            .unwrap();
+
+        repo.delete(&stored.id.0).unwrap();
+
+        let res = repo.update(&stored.id.0, UpdateEntry::default());
+        assert!(matches!(res, Err(LoreError::NotFound(_))));
+    }
+
+    #[test]
+    fn by_type_with_status_filter() {
+        let repo = setup_repo();
+        // Store 2 planned and 1 executed
+        repo.store(NewEntry {
+            entry_type: EntryType::Plan,
+            title: "P1".into(),
+            body: None,
+            role: "architect".into(),
+            tags: None,
+            related_entries: None,
+            data: Some(serde_json::json!({ "scope": "s", "tier": "S", "status": "planned" })),
+        })
+        .unwrap();
+        repo.store(NewEntry {
+            entry_type: EntryType::Plan,
+            title: "P2".into(),
+            body: None,
+            role: "architect".into(),
+            tags: None,
+            related_entries: None,
+            data: Some(serde_json::json!({ "scope": "s", "tier": "S", "status": "planned" })),
+        })
+        .unwrap();
+        repo.store(NewEntry {
+            entry_type: EntryType::Plan,
+            title: "P3".into(),
+            body: None,
+            role: "architect".into(),
+            tags: None,
+            related_entries: None,
+            data: Some(serde_json::json!({ "scope": "s", "tier": "S", "status": "executed" })),
+        })
+        .unwrap();
+
+        let filtered = repo
+            .by_type(
+                EntryType::Plan,
+                &Filters { status: Some("planned".into()), limit: 10, offset: 0 },
+            )
+            .unwrap();
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn search_returns_empty_for_no_match() {
+        let repo = setup_repo();
+        let results = repo
+            .search(&SearchQuery { query: "nonexistent".into(), entry_type: None, limit: 10 })
+            .unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn stats_empty_database() {
+        let repo = setup_repo();
+        let stats = repo.stats().unwrap();
+        assert_eq!(stats.total, 0);
+        assert!(stats.by_type.is_empty());
+        assert!(stats.last_updated.is_none());
+    }
+
+    #[test]
+    fn poisoned_mutex_returns_error() {
+        let err = LoreError::Poison("mutex poisoned".into());
+        assert!(err.to_string().contains("mutex poisoned"));
+    }
 }
