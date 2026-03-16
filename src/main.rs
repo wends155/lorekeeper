@@ -122,7 +122,7 @@ async fn main() -> Result<(), LoreError> {
                 .into(),
         ),
         meta: None,
-        protocol_version: "2025-03-26".into(),
+        protocol_version: "2025-11-25".into(),
         server_info: Implementation {
             name: "lorekeeper".into(),
             version: env!("CARGO_PKG_VERSION").into(),
