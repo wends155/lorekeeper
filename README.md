@@ -10,7 +10,7 @@ Lorekeeper is a Rust MCP (Model Context Protocol) server that provides structure
 - **Typed Entries:** 10 semantic entry types (e.g., `DECISION`, `COMMIT`, `PLAN`, `LESSON`, `TECH_DEBT`).
 - **Role Enforcement:** Mechanically prevents unauthorized writes (e.g., Builder agents cannot assert architectural constraints).
 - **Full-Text Search:** Backed by SQLite FTS5 across titles, bodies, and tags.
-- **Rich Interaction:** 11 MCP tools covering CRUD, search, and memory analytics.
+- **Rich Interaction:** 10 MCP tools covering CRUD, search, and memory analytics.
 - **Isolated Storage:** Automatically manages a project-local SQLite database (`.lorekeeper/memory.db`).
 
 ## Installation
@@ -28,8 +28,18 @@ just install
 
 ## MCP Configuration
 
-To use Lorekeeper with MCP-compatible clients (like Claude Desktop or custom agents), add the server to your `mcp_config.json`:
+To use Lorekeeper with MCP-compatible clients, add the server to your configuration. 
+Since `cargo install` places the binary in `~/.cargo/bin/`, which should be on your PATH, you can usually use the bare command. If it fails to spawn, use the absolute path to `lorekeeper.exe`.
 
+**Antigravity (`mcp_config.json`):**
+```json
+"lorekeeper": {
+  "command": "lorekeeper",
+  "args": []
+}
+```
+
+**Claude Desktop (`claude_desktop_config.json`):**
 ```json
 {
   "mcpServers": {
@@ -40,15 +50,13 @@ To use Lorekeeper with MCP-compatible clients (like Claude Desktop or custom age
 }
 ```
 
-*Note: Ensure the `lorekeeper` executable is in your system's `PATH`, or provide the absolute path to the binary.*
-
 ## Usage for Agents
 
 Lorekeeper provides the following MCP tools for agentic workflows:
 
 - **Write:** `lorekeeper_store`, `lorekeeper_update`, `lorekeeper_delete`
-- **Read:** `lorekeeper_get`, `lorekeeper_search`, `lorekeeper_recent`, `lorekeeper_by_type`
-- **Meta:** `lorekeeper_stats`, `lorekeeper_render`, `lorekeeper_help`
+- **Read:** `lorekeeper_get`, `lorekeeper_search`, `lorekeeper_recent`, `lorekeeper_by_type`, `lorekeeper_render`
+- **Meta:** `lorekeeper_stats`, `lorekeeper_help`
 
 Agents can self-discover capabilities by calling `lorekeeper_help`.
 

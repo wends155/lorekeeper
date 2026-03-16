@@ -37,7 +37,7 @@ context window consumption.
 - **10 typed entry types** (DECISION, COMMIT, CONSTRAINT, LESSON, PLAN, FEATURE,
   STUB, DEFERRED, BUILDER_NOTE, TECH_DEBT) with type-specific validation.
 - **FTS5 full-text search** across titles, bodies, and tags.
-- **11 MCP tools** (4 write, 5 read, 2 meta) for complete CRUD + search + analytics.
+- **10 MCP tools** (3 write, 5 read, 2 meta) for complete CRUD + search + analytics.
 - **Role enforcement** — server validates `role` field on every write operation.
 - **Markdown export** — `memory_render` generates human-readable output for review.
 - **Per-project database** — isolated `.lorekeeper/memory.db` per project root.
@@ -143,7 +143,7 @@ lorekeeper/
 
 ### `server` — MCP Tool Handlers
 
-- **Owns:** MCP server bootstrap, tool registration (11 tools), request parsing,
+- **Owns:** MCP server bootstrap, tool registration (10 tools), request parsing,
   response formatting, JSON-RPC error mapping.
 - **Does NOT Own:** Storage logic, validation, database access.
 - **Trait Interfaces:** Depends on `EntryRepository` trait (injected).
