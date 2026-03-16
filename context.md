@@ -6,6 +6,12 @@
 - All technical debt from the initial audit has been remediated.
 - The project is fully functional, lint-compliant, and well-tested.
 
+### [x] Crates.io Readiness & Publication Remediation (2026-03-16)
+- Audited project for `cargo publish` readiness and remediated 6 findings.
+- Removed `publish = false`, added required metadata (description, keywords, repository, etc.), and synced `rust-version`.
+- Configured crate hygiene by excluding `.agent/` and internal documentation via `Cargo.toml`.
+- Ensured zero-warning test suite under `cargo package --list` by configuring `#[allow(clippy::expect_used)]` on tests.
+
 ### [x] Builtin Help System Resync (2026-03-16)
 - Remediated 8 documentation findings from the Auto-Evolution audit.
 - Synced `help.rs` and `main.rs` to include `SESSION_SUMMARY`, `lorekeeper_reflect`, and access/duplicate tracking.

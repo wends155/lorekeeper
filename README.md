@@ -2,7 +2,7 @@
 
 > Agent Long-Term Memory Bank using SQLite and FTS5.
 
-[![Crates.io](https://img.shields.io/crates/v/lorekeeper)](https://crates.io/crates/lorekeeper) [![docs.rs](https://img.shields.io/docsrs/lorekeeper)](https://docs.rs/lorekeeper) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/wends155/lorekeeper/actions/workflows/ci.yml/badge.svg)](https://github.com/wends155/lorekeeper/actions) [![Crates.io](https://img.shields.io/crates/v/lorekeeper)](https://crates.io/crates/lorekeeper) [![docs.rs](https://img.shields.io/docsrs/lorekeeper)](https://docs.rs/lorekeeper) [![GitHub release](https://img.shields.io/github/v/release/wends155/lorekeeper)](https://github.com/wends155/lorekeeper/releases) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Lorekeeper is a Rust MCP (Model Context Protocol) server that provides structured long-term memory for AI coding agents (operating under the TARS protocol or similar workflows). It replaces flat-file history with a queryable SQLite database, enabling agents to store, search, and retrieve typed memory entries via MCP tools over stdio.
 
