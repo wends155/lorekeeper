@@ -500,6 +500,16 @@ impl ServerHandlerCore for LoreHandler {
         _runtime: Arc<dyn McpServer>,
     ) -> Result<ResultFromServer, RpcError> {
         match request {
+            RequestFromClient::InitializeRequest(_) => {
+                let info = _runtime.server_info().clone();
+                Ok(ResultFromServer::InitializeResult(info))
+            }
+            RequestFromClient::PingRequest(_) => {
+                Ok(ResultFromServer::Result(rust_mcp_sdk::schema::Result {
+                    meta: None,
+                    extra: None,
+                }))
+            }
             RequestFromClient::ListToolsRequest(_) => {
                 Ok(ResultFromServer::ListToolsResult(ListToolsResult {
                     tools: Self::get_tools(),
@@ -820,14 +830,7 @@ mod tests {
         let handler = LoreHandler::with_defaults(Arc::new(mock));
         let result = handler
             .handle_request(
-                RequestFromClient::InitializeRequest(
-                    serde_json::from_value(json!({
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {},
-                        "clientInfo": { "name": "test", "version": "1.0" }
-                    }))
-                    .unwrap(),
-                ),
+                RequestFromClient::ListResourcesRequest(None),
                 Arc::new(NoOpMcpServer),
             )
             .await;
