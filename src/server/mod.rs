@@ -1223,6 +1223,26 @@ mod tests {
     }
 
     #[test]
+    fn handle_search_omit_limit() -> Result<(), String> {
+        let mut mock = MockEntryRepository::new();
+        // Expect search to be called with limit=20 (the new default)
+        mock.expect_search().withf(|query| query.limit == 20).times(1).returning(|_| Ok(vec![]));
+
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "lorekeeper_search".to_owned(),
+            // Omit 'limit' intentionally
+            arguments: Some(to_map(&json!({ "query": "test" }))),
+            meta: None,
+            task: None,
+        };
+
+        let result = handler.handle_tool_call(params)?;
+        assert_eq!(result.as_array().ok_or("expected array")?.len(), 0);
+        Ok(())
+    }
+
+    #[test]
     fn handle_recent_success() -> Result<(), String> {
         let mut mock = MockEntryRepository::new();
         mock.expect_recent().times(1).returning(|_| Ok(vec![test_entry("r1")]));
@@ -1281,6 +1301,31 @@ mod tests {
         let arr = result.as_array().ok_or("expected array")?;
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["id"], "bt1");
+        Ok(())
+    }
+
+    #[test]
+    fn handle_by_type_omit_limit_offset() -> Result<(), String> {
+        let mut mock = MockEntryRepository::new();
+        // Expect by_type to be called with defaults: limit=20, offset=0
+        mock.expect_by_type()
+            .withf(|_, filters| filters.limit == 20 && filters.offset == 0)
+            .times(1)
+            .returning(|_, _| Ok(vec![]));
+
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "lorekeeper_by_type".to_owned(),
+            // Omit 'limit' and 'offset' intentionally
+            arguments: Some(to_map(&json!({
+                "entry_type": "DECISION"
+            }))),
+            meta: None,
+            task: None,
+        };
+
+        let result = handler.handle_tool_call(params)?;
+        assert_eq!(result.as_array().ok_or("expected array")?.len(), 0);
         Ok(())
     }
 

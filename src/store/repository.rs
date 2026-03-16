@@ -7,6 +7,10 @@ use crate::model::types::{EntryType, ReflectCriteria, ReflectReport, SimilarEntr
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+const fn default_limit() -> u32 {
+    20
+}
+
 /// Parameters for searching memory entries.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchQuery {
@@ -15,6 +19,7 @@ pub struct SearchQuery {
     /// Optional filter by entry type.
     pub entry_type: Option<EntryType>,
     /// Maximum number of results to return.
+    #[serde(default = "default_limit")]
     pub limit: u32,
 }
 
@@ -24,8 +29,10 @@ pub struct Filters {
     /// Optional status filter (stored in `data` JSON).
     pub status: Option<String>,
     /// Maximum number of results to return.
+    #[serde(default = "default_limit")]
     pub limit: u32,
     /// Number of results to skip.
+    #[serde(default)]
     pub offset: u32,
 }
 

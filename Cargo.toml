@@ -1,6 +1,6 @@
 [package]
 name = "lorekeeper"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 rust-version = "1.94.0"
 description = "Agent long-term memory bank — MCP server with SQLite and FTS5"
