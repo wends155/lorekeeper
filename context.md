@@ -7,6 +7,7 @@
 - The project is fully functional, lint-compliant, and well-tested.
 
 ### [x] Release v0.3.1 (2026-03-16)
+- Published to crates.io and GitHub Releases.
 - Implemented graceful startup for cases where `LOREKEEPER_ROOT` is not provided.
 - Added a fallback to an in-memory SQLite database when starting without a project root.
 - Added a tool call guard in `handle_tool_call` to enforce that agents must call `lorekeeper_set_root` to start making data modifications.
@@ -15,6 +16,7 @@
 - Created and pushed git tags for `v0.3.0` and `v0.3.1`.
 
 ### [x] Release v0.3.0 (2026-03-16)
+- Published to GitHub Releases.
 - Implemented multi-project support via the `lorekeeper_set_root` tool.
 - Refactored `LoreHandler` to use `RwLock` for dynamic database switching at runtime without server restart.
 ### [x] Release v0.2.0 (2026-03-16)
