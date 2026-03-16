@@ -5,10 +5,12 @@
 //! appropriate repository methods.
 
 use crate::config::LoreConfig;
+use crate::db::Database;
 use crate::model::entry::{NewEntry, UpdateEntry};
 use crate::model::types::{EntryType, ReflectCriteria};
 use crate::render::render_entries;
 use crate::store::repository::{EntryRepository, Filters, SearchQuery};
+use crate::store::sqlite::SqliteEntryRepo;
 use async_trait::async_trait;
 use rust_mcp_sdk::McpServer;
 use rust_mcp_sdk::mcp_server::ServerHandlerCore;
@@ -18,7 +20,8 @@ use rust_mcp_sdk::schema::{
 };
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 use tracing::{error, info, warn};
 
 // ---- Tool description strings -----------------------------------------------
@@ -123,12 +126,19 @@ const DESC_HELP: &str = "Get contextual help about Lorekeeper tools, entry types
     - At the start of a session to review the workflow\n\n\
     RETURNS: Markdown help text for the requested topic.";
 
+const DESC_SET_ROOT: &str = "Set the active project root directory. Switches the memory database to <path>/.lorekeeper/memory.db. Call this at session start when working in a new project.\n\n\
+    WHEN TO USE:\n\
+    - At session start to point Lorekeeper at the active workspace\n\
+    - When switching between projects mid-session\n\n\
+    RETURNS: { status: success, root: <path>, entries: <count> }";
+
 mod help;
 
 /// The primary MCP server handler for Lorekeeper tools.
 pub struct LoreHandler {
-    repo: Arc<dyn EntryRepository>,
-    config: LoreConfig,
+    repo: RwLock<Arc<dyn EntryRepository>>,
+    config: RwLock<LoreConfig>,
+    root: RwLock<Option<PathBuf>>,
 }
 
 impl std::fmt::Debug for LoreHandler {
@@ -138,20 +148,33 @@ impl std::fmt::Debug for LoreHandler {
 }
 
 impl LoreHandler {
+    fn repo(&self) -> Arc<dyn EntryRepository> {
+        Arc::clone(&self.repo.read().unwrap_or_else(std::sync::PoisonError::into_inner))
+    }
+
+    fn config(&self) -> LoreConfig {
+        self.config.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    }
+
     /// Creates a new `LoreHandler` with the given repository and project config.
     ///
     /// # Arguments
     ///
     /// * `repo` - A thread-safe reference to an [`EntryRepository`] implementation.
     /// * `config` - The project-local [`LoreConfig`] loaded from `.lorekeeper/config.toml`.
-    pub fn new(repo: Arc<dyn EntryRepository>, config: LoreConfig) -> Self {
-        Self { repo, config }
+    /// * `root` - Optional project root path.
+    pub fn new(repo: Arc<dyn EntryRepository>, config: LoreConfig, root: Option<PathBuf>) -> Self {
+        Self { repo: RwLock::new(repo), config: RwLock::new(config), root: RwLock::new(root) }
     }
 
     /// Creates a `LoreHandler` with default config. Intended for tests and toolcheck scenarios.
     #[cfg(test)]
     pub fn with_defaults(repo: Arc<dyn EntryRepository>) -> Self {
-        Self { repo, config: LoreConfig::default() }
+        Self {
+            repo: RwLock::new(repo),
+            config: RwLock::new(LoreConfig::default()),
+            root: RwLock::new(None),
+        }
     }
 
     fn make_tool(
@@ -321,6 +344,16 @@ impl LoreHandler {
                 ]),
                 vec![],
             ),
+            // -- SYSTEM TOOLS -------------------------------------------------
+            Self::make_tool(
+                "lorekeeper_set_root",
+                DESC_SET_ROOT,
+                HashMap::from([("path".into(), json!({
+                    "type": "string",
+                    "description": "Absolute path to the project root directory"
+                }))]),
+                vec!["path".into()],
+            ),
             // -- HELP TOOL ----------------------------------------------------
             Self::make_tool(
                 "lorekeeper_help",
@@ -343,7 +376,7 @@ impl LoreHandler {
         let tool_name = params.name.clone();
         info!(tool = %tool_name, "tool call received");
 
-        let args = params.arguments.unwrap_or_default();
+        let args = params.arguments.clone().unwrap_or_default();
         let args_value = Value::Object(args.clone());
 
         match params.name.as_str() {
@@ -353,16 +386,18 @@ impl LoreHandler {
                 let title = input.title.clone();
                 let body = input.body.clone();
                 let entry_type = input.entry_type;
-                let entry = self.repo.store(input).map_err(|e| {
+                let entry = self.repo().store(input).map_err(|e| {
                     warn!(error = %e, "lorekeeper_store rejected");
                     e.to_string()
                 })?;
                 info!(id = %entry.id.0, "entry stored");
 
                 // Duplicate detection: find similar entries in the same type
-                let threshold = self.config.store.similarity_threshold;
-                let similar =
-                    self.repo.find_similar(&title, body, entry_type, threshold).unwrap_or_default();
+                let threshold = self.config().store.similarity_threshold;
+                let similar = self
+                    .repo()
+                    .find_similar(&title, body, entry_type, threshold)
+                    .unwrap_or_default();
 
                 if similar.is_empty() {
                     Ok(json!({ "status": "success", "id": entry.id.0 }))
@@ -379,7 +414,7 @@ impl LoreHandler {
                 let id = args.get("id").and_then(|v| v.as_str()).ok_or("missing id")?;
                 let update: UpdateEntry =
                     serde_json::from_value(args_value).map_err(|e| e.to_string())?;
-                let entry = self.repo.update(id, update).map_err(|e| {
+                let entry = self.repo().update(id, update).map_err(|e| {
                     warn!(id = %id, error = %e, "lorekeeper_update rejected");
                     e.to_string()
                 })?;
@@ -388,7 +423,7 @@ impl LoreHandler {
             }
             "lorekeeper_delete" => {
                 let id = args.get("id").and_then(|v| v.as_str()).ok_or("missing id")?;
-                self.repo.delete(id).map_err(|e| {
+                self.repo().delete(id).map_err(|e| {
                     warn!(id = %id, error = %e, "lorekeeper_delete failed");
                     e.to_string()
                 })?;
@@ -396,7 +431,7 @@ impl LoreHandler {
                 Ok(json!({ "status": "success" }))
             }
             "lorekeeper_render" => {
-                let entries = self.repo.render_all().map_err(|e| {
+                let entries = self.repo().render_all().map_err(|e| {
                     error!(error = %e, "lorekeeper_render: repo.render_all failed");
                     e.to_string()
                 })?;
@@ -406,7 +441,7 @@ impl LoreHandler {
             "lorekeeper_search" => {
                 let query: SearchQuery =
                     serde_json::from_value(args_value).map_err(|e| e.to_string())?;
-                let entries = self.repo.search(&query).map_err(|e| {
+                let entries = self.repo().search(&query).map_err(|e| {
                     error!(error = %e, "lorekeeper_search: db error");
                     e.to_string()
                 })?;
@@ -415,7 +450,7 @@ impl LoreHandler {
             }
             "lorekeeper_get" => {
                 let id = args.get("id").and_then(|v| v.as_str()).ok_or("missing id")?;
-                let entry = self.repo.get(id).map_err(|e| {
+                let entry = self.repo().get(id).map_err(|e| {
                     warn!(id = %id, error = %e, "lorekeeper_get: not found or error");
                     e.to_string()
                 })?;
@@ -426,7 +461,7 @@ impl LoreHandler {
                     args.get("limit").and_then(serde_json::Value::as_u64).unwrap_or(10),
                 )
                 .unwrap_or(10);
-                let entries = self.repo.recent(limit).map_err(|e| {
+                let entries = self.repo().recent(limit).map_err(|e| {
                     error!(error = %e, "lorekeeper_recent: db error");
                     e.to_string()
                 })?;
@@ -439,14 +474,14 @@ impl LoreHandler {
                     serde_json::from_value(json!(et_str)).map_err(|e| e.to_string())?;
                 let filters: Filters =
                     serde_json::from_value(args_value).map_err(|e| e.to_string())?;
-                let entries = self.repo.by_type(et, &filters).map_err(|e| {
+                let entries = self.repo().by_type(et, &filters).map_err(|e| {
                     error!(error = %e, "lorekeeper_by_type: db error");
                     e.to_string()
                 })?;
                 serde_json::to_value(entries).map_err(|e| e.to_string())
             }
             "lorekeeper_stats" => {
-                let stats = self.repo.stats().map_err(|e| {
+                let stats = self.repo().stats().map_err(|e| {
                     error!(error = %e, "lorekeeper_stats: db error");
                     e.to_string()
                 })?;
@@ -455,7 +490,7 @@ impl LoreHandler {
             "lorekeeper_reflect" => {
                 let criteria: ReflectCriteria =
                     serde_json::from_value(args_value).unwrap_or_default();
-                let report = self.repo.reflect(&criteria, &self.config).map_err(|e| {
+                let report = self.repo().reflect(&criteria, &self.config()).map_err(|e| {
                     error!(error = %e, "lorekeeper_reflect: analysis failed");
                     e.to_string()
                 })?;
@@ -466,6 +501,7 @@ impl LoreHandler {
                 );
                 serde_json::to_value(report).map_err(|e| e.to_string())
             }
+            "lorekeeper_set_root" => self.handle_set_root(params),
             "lorekeeper_help" => {
                 let topic = args.get("topic").and_then(|v| v.as_str()).unwrap_or("overview");
                 Ok(json!({ "content": Self::get_help(topic) }))
@@ -475,6 +511,36 @@ impl LoreHandler {
                 Err(format!("unknown tool: {other}"))
             }
         }
+    }
+
+    #[allow(clippy::needless_pass_by_value)]
+    fn handle_set_root(&self, params: CallToolRequestParams) -> Result<Value, String> {
+        let args = params.arguments.as_ref().ok_or("missing arguments")?;
+        let path_str = args.get("path").and_then(|v| v.as_str()).ok_or("missing path")?;
+        let path = PathBuf::from(path_str);
+
+        if !path.exists() {
+            return Err(format!("path does not exist: {path_str}"));
+        }
+
+        let lk_dir = path.join(".lorekeeper");
+        std::fs::create_dir_all(&lk_dir)
+            .map_err(|e| format!("failed to create .lorekeeper dir: {e}"))?;
+
+        let db_path = lk_dir.join("memory.db");
+        let db = Database::open(&db_path).map_err(|e| format!("failed to open database: {e}"))?;
+        let entry_count: i64 =
+            db.connection().query_row("SELECT count(*) FROM entry", [], |r| r.get(0)).unwrap_or(0);
+
+        let new_repo = Arc::new(SqliteEntryRepo::new(db.into_connection()));
+        let new_config = LoreConfig::load(&lk_dir);
+
+        *self.repo.write().unwrap_or_else(std::sync::PoisonError::into_inner) = new_repo;
+        *self.config.write().unwrap_or_else(std::sync::PoisonError::into_inner) = new_config;
+        *self.root.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(path.clone());
+
+        info!(root = %path.display(), entries = entry_count, "project root switched");
+        Ok(json!({ "status": "success", "root": path_str, "entries": entry_count }))
     }
 
     /// Returns contextual help text for a given topic.
@@ -772,7 +838,7 @@ mod tests {
         let result = handler.handle_request(request, Arc::new(NoOpMcpServer)).await;
         if let Ok(ResultFromServer::ListToolsResult(res)) = result {
             let ListToolsResult { tools, .. } = res;
-            assert_eq!(tools.len(), 11);
+            assert_eq!(tools.len(), 12);
         } else {
             panic!("expected ListToolsResult, got {result:?}");
         }
@@ -1248,5 +1314,57 @@ mod tests {
         let content = result["content"].as_str().ok_or("missing content")?;
         assert!(content.contains("Workflow Guide"));
         Ok(())
+    }
+
+    #[test]
+    fn test_set_root_success() -> Result<(), String> {
+        let temp_dir = std::env::temp_dir()
+            .join(format!("lk_test_{}", Utc::now().timestamp_nanos_opt().unwrap_or(0)));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let root = temp_dir.clone();
+
+        let mock = MockEntryRepository::new();
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
+        assert!(handler.root.read().unwrap().is_none());
+
+        let params = CallToolRequestParams {
+            name: "lorekeeper_set_root".to_owned(),
+            arguments: Some(to_map(&json!({ "path": root.to_string_lossy() }))),
+            meta: None,
+            task: None,
+        };
+
+        let result = handler.handle_tool_call(params)?;
+        assert_eq!(result["status"], "success");
+        assert_eq!(result["root"].as_str().unwrap(), root.to_string_lossy());
+        assert_eq!(result["entries"], 0);
+
+        // Ensure .lorekeeper directory was created
+        assert!(root.join(".lorekeeper").exists());
+
+        // Ensure the handler's root was updated
+        assert_eq!(handler.root.read().unwrap().as_ref().unwrap(), &root);
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_set_root_invalid_path() {
+        let mock = MockEntryRepository::new();
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "lorekeeper_set_root".to_owned(),
+            arguments: Some(to_map(&json!({ "path": "/some/nonexistent_path_lmao_99999" }))),
+            meta: None,
+            task: None,
+        };
+
+        let result = handler.handle_tool_call(params);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("path does not exist"));
     }
 }

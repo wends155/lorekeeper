@@ -67,7 +67,7 @@ async fn main() -> Result<(), LoreError> {
     );
 
     // 6. Build MCP server
-    let handler = LoreHandler::new(repo, config);
+    let handler = LoreHandler::new(repo, config, Some(root.clone()));
 
     let transport = StdioTransport::new(TransportOptions::default())
         .map_err(|e| LoreError::Internal(e.to_string()))?;
@@ -87,10 +87,11 @@ async fn main() -> Result<(), LoreError> {
              It survives across sessions and context resets.\n\
              \n\
              SESSION START:\n\
-              1. Call lorekeeper_stats to see the current state of the memory bank.\n\
-              2. Call lorekeeper_reflect to surface stale, dead, or duplicate entries.\n\
-              3. Call lorekeeper_recent to load recent context (last 10 entries).\n\
-              4. Before making decisions, call lorekeeper_search to check for prior decisions and constraints.\n\
+              1. Call lorekeeper_set_root if working in a new project (multi-project support).\n\
+              2. Call lorekeeper_stats to see the current state of the memory bank.\n\
+              3. Call lorekeeper_reflect to surface stale, dead, or duplicate entries.\n\
+              4. Call lorekeeper_recent to load recent context (last 10 entries).\n\
+              5. Before making decisions, call lorekeeper_search to check for prior decisions and constraints.\n\
               \n\
               DURING WORK:\n\
               - Architectural decision made → lorekeeper_store with type DECISION (architect role)\n\

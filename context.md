@@ -6,6 +6,10 @@
 - All technical debt from the initial audit has been remediated.
 - The project is fully functional, lint-compliant, and well-tested.
 
+### [x] Release v0.3.0 (2026-03-16)
+- Implemented multi-project support via the `lorekeeper_set_root` tool.
+- Refactored `LoreHandler` to use `RwLock` for dynamic database switching at runtime without server restart.
+
 ### [x] Release v0.2.0 (2026-03-16)
 - Upgraded `rust-mcp-sdk` from `0.8.3` → `0.9.0` for MCP protocol `2025-06-18`/`2025-11-25` compatibility.
 - Added `InitializeRequest`/`PingRequest` handlers to `ServerHandlerCore` (v0.9.0 dispatch change).
