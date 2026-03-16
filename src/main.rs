@@ -27,47 +27,47 @@ async fn main() -> Result<(), LoreError> {
     fmt().with_env_filter(filter).with_writer(std::io::stderr).with_max_level(Level::TRACE).init();
 
     // 2. Discover project root
-    let root = if let Ok(val) = env::var("LOREKEEPER_ROOT") {
-        PathBuf::from(val)
+    let root = env::var("LOREKEEPER_ROOT")
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| env::current_dir().ok().and_then(|cwd| find_project_root(&cwd)));
+
+    // 3. Open Database, Load Config, & build repository
+    let (repo, config, handler_root) = if let Some(ref r) = root {
+        info!("Starting Lorekeeper in project root: {}", r.display());
+
+        let lorekeeper_dir = r.join(".lorekeeper");
+        if !lorekeeper_dir.exists() {
+            std::fs::create_dir_all(&lorekeeper_dir).map_err(|e| {
+                LoreError::Validation(format!("failed to create .lorekeeper dir: {e}"))
+            })?;
+            info!("Created .lorekeeper directory");
+        }
+
+        let db_path = lorekeeper_dir.join("memory.db");
+        let db = Database::open(&db_path)?;
+
+        let entry_count: i64 =
+            db.connection().query_row("SELECT count(*) FROM entry", [], |row| row.get(0))?;
+        info!("Lorekeeper memory database loaded ({} entries)", entry_count);
+
+        let repo = Arc::new(SqliteEntryRepo::new(db.into_connection()));
+        let config = LoreConfig::load(&lorekeeper_dir);
+        info!(
+            "Loaded config: stale_days={}, similarity_threshold={:.2}",
+            config.reflect.stale_days, config.store.similarity_threshold
+        );
+
+        (repo, config, Some(r.clone()))
     } else {
-        let cwd = env::current_dir().map_err(|e| LoreError::ProjectRoot(e.to_string()))?;
-        find_project_root(&cwd).ok_or_else(|| {
-            LoreError::ProjectRoot(
-                "could not locate project root — set LOREKEEPER_ROOT or run from within a project directory".to_owned(),
-            )
-        })?
+        tracing::warn!("No project root found — start with lorekeeper_set_root");
+        let db = Database::open_in_memory()?;
+        let repo = Arc::new(SqliteEntryRepo::new(db.into_connection()));
+        (repo, LoreConfig::default(), None)
     };
 
-    info!("Starting Lorekeeper in project root: {}", root.display());
-
-    // 3. Create .lorekeeper directory
-    let lorekeeper_dir = root.join(".lorekeeper");
-    if !lorekeeper_dir.exists() {
-        std::fs::create_dir_all(&lorekeeper_dir)
-            .map_err(|e| LoreError::Validation(format!("failed to create .lorekeeper dir: {e}")))?;
-        info!("Created .lorekeeper directory");
-    }
-
-    // 4. Open Database & build repository
-    let db_path = lorekeeper_dir.join("memory.db");
-    let db = Database::open(&db_path)?;
-
-    let entry_count: i64 =
-        db.connection().query_row("SELECT count(*) FROM entry", [], |row| row.get(0))?;
-    info!("Lorekeeper memory database loaded ({} entries)", entry_count);
-
-    // Consume the db to extract the connection for the repo
-    let repo = Arc::new(SqliteEntryRepo::new(db.into_connection()));
-
-    // 5. Load project config (auto-generates defaults if .lorekeeper/config.toml is missing)
-    let config = LoreConfig::load(&lorekeeper_dir);
-    info!(
-        "Loaded config: stale_days={}, similarity_threshold={:.2}",
-        config.reflect.stale_days, config.store.similarity_threshold
-    );
-
-    // 6. Build MCP server
-    let handler = LoreHandler::new(repo, config, Some(root.clone()));
+    // 4. Build MCP server
+    let handler = LoreHandler::new(repo, config, handler_root);
 
     let transport = StdioTransport::new(TransportOptions::default())
         .map_err(|e| LoreError::Internal(e.to_string()))?;
@@ -87,7 +87,7 @@ async fn main() -> Result<(), LoreError> {
              It survives across sessions and context resets.\n\
              \n\
              SESSION START:\n\
-              1. Call lorekeeper_set_root if working in a new project (multi-project support).\n\
+              1. Call lorekeeper_set_root to point Lorekeeper at the active workspace.\n\
               2. Call lorekeeper_stats to see the current state of the memory bank.\n\
               3. Call lorekeeper_reflect to surface stale, dead, or duplicate entries.\n\
               4. Call lorekeeper_recent to load recent context (last 10 entries).\n\

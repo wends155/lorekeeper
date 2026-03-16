@@ -6,10 +6,15 @@
 - All technical debt from the initial audit has been remediated.
 - The project is fully functional, lint-compliant, and well-tested.
 
+### [x] Release v0.3.1 (2026-03-16)
+- Implemented graceful startup for cases where `LOREKEEPER_ROOT` is not provided.
+- Added a fallback to an in-memory SQLite database when starting without a project root.
+- Added a tool call guard in `handle_tool_call` to enforce that agents must call `lorekeeper_set_root` to start making data modifications.
+- Updated the connection instructions and removed the hard `LOREKEEPER_ROOT` dependency from `mcp_config.json`.
+
 ### [x] Release v0.3.0 (2026-03-16)
 - Implemented multi-project support via the `lorekeeper_set_root` tool.
 - Refactored `LoreHandler` to use `RwLock` for dynamic database switching at runtime without server restart.
-
 ### [x] Release v0.2.0 (2026-03-16)
 - Upgraded `rust-mcp-sdk` from `0.8.3` → `0.9.0` for MCP protocol `2025-06-18`/`2025-11-25` compatibility.
 - Added `InitializeRequest`/`PingRequest` handlers to `ServerHandlerCore` (v0.9.0 dispatch change).
