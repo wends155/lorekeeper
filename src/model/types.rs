@@ -176,8 +176,12 @@ pub enum ReflectFocus {
     Hot,
     /// Entries with broken or stale `related_entries` links.
     Orphaned,
-    /// Same-type entries with textual or tag overlap.
+    /// Potential contradiction count.
     Contradictions,
+    /// Missing entry types.
+    CoverageGaps,
+    /// Entries with no cross-references.
+    Lonely,
     /// Run all checks.
     #[default]
     All,
@@ -215,7 +219,7 @@ pub struct ReflectCriteria {
 /// A single actionable finding from the reflect analysis.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReflectFinding {
-    /// Finding category (stale / dead / hot / orphaned / contradictions).
+    /// Finding category (stale / dead / hot / orphaned / contradictions / `coverage_gaps` / lonely).
     pub category: String,
     /// UUID of the affected entry.
     pub entry_id: String,
@@ -242,6 +246,10 @@ pub struct ReflectSummary {
     pub orphaned: usize,
     /// Potential contradiction count.
     pub contradictions: usize,
+    /// Missing entry type count.
+    pub coverage_gaps: usize,
+    /// Lonely entry count.
+    pub lonely: usize,
 }
 
 /// Complete output of `lorekeeper_reflect`.
@@ -268,4 +276,26 @@ pub struct SimilarEntry {
     pub entry_type: String,
     /// BM25 similarity score (higher magnitude = more similar).
     pub score: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    #[test]
+    fn reflect_focus_serde_new_variants() {
+        assert_eq!(
+            serde_json::to_string(&ReflectFocus::CoverageGaps).unwrap(),
+            "\"coverage_gaps\""
+        );
+        assert_eq!(serde_json::to_string(&ReflectFocus::Lonely).unwrap(), "\"lonely\"");
+    }
+
+    #[test]
+    fn reflect_summary_includes_new_fields() {
+        let s = ReflectSummary::default();
+        assert_eq!(s.coverage_gaps, 0);
+        assert_eq!(s.lonely, 0);
+    }
 }

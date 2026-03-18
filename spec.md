@@ -3,10 +3,10 @@
 | Field | Value |
 |-------|-------|
 | **Project** | Lorekeeper |
-| **Version** | 2 |
-| **Last Updated** | 2026-03-16 |
+| **Version** | 3 |
+| **Last Updated** | 2026-03-18 |
 
-> Last verified against: `a724075` (2026-03-16, v0.3.2)
+> Last verified against: `ba52770` (2026-03-18, v0.3.3-dev)
 
 ---
 
@@ -19,7 +19,7 @@
 | Field | Type | Constraints | Default | Notes |
 |-------|------|-------------|---------|-------|
 | `id` | `EntryId` | PK, UUID v7 | Auto-generated | Time-ordered semantic |
-| `entry_type` | `EntryType` | NOT NULL | — | Enum of 10 supported types |
+| `entry_type` | `EntryType` | NOT NULL | — | Enum of 11 supported types |
 | `title` | `String` | NOT NULL, non-empty | — | First line of COMMIT message |
 | `body` | `Option<String>` | | `None` | Nullable if title suffices |
 | `role` | `String` | NOT NULL, restricted | — | Must be "architect" or "builder" |
@@ -177,7 +177,6 @@ THEN the deleted entry is not included in the results
 
 | Tool Name | Parameters | Returns Format |
 |-----------|------------|----------------|
-| `lorekeeper_store` | `entry_type`, `role`, `title`, `body?`, `tags?`, `related_entries?`, `data?` | JSON Object `{ status: success, id: uuid }` |
 | `lorekeeper_update` | `id`, `title?`, `body?`, `tags?`, `related_entries?`, `data?` | JSON Object (Serialized `Entry`) |
 | `lorekeeper_delete` | `id` | JSON Object `{ status: success }` |
 | `lorekeeper_render` | `format?` (markdown, default) | Markdown Text |
@@ -186,7 +185,8 @@ THEN the deleted entry is not included in the results
 | `lorekeeper_recent` | `limit?` | JSON Array of `Entry` |
 | `lorekeeper_by_type` | `entry_type`, `status?`, `limit?`, `offset?` | JSON Array of `Entry` |
 | `lorekeeper_stats` | (none) | JSON Object (type counts, last_updated) |
-| `lorekeeper_reflect` | `focus?`, `limit?`, `stale_days?`, `min_access_count?` | JSON Object (stale, dead, hot, orphaned, contradictions) |
+| `lorekeeper_reflect` | `focus?`, `limit?`, `stale_days?`, `min_access_count?` | JSON Object (stale, dead, hot, orphaned, contradictions, coverage_gaps, lonely) |
+| `lorekeeper_store` | `entry_type`, `role`, `title`, `body?`, `tags?`, `related_entries?`, `data?` | JSON Object `{ status: success, id: uuid, suggestions?: [] }` |
 | `lorekeeper_set_root` | `path` | JSON Object `{ status: success, root, entries }` |
 | `lorekeeper_help` | `topic?` | Markdown help text |
 
@@ -237,6 +237,29 @@ AND `lorekeeper_set_root` has NOT been called
 WHEN any data-modifying tool (e.g. `lorekeeper_store`, `lorekeeper_stats`) is invoked
 THEN the tool call returns an error: "no project root set — call lorekeeper_set_root first"
 AND `lorekeeper_set_root` and `lorekeeper_help` remain functional
+
+[HAPPY] Reflect detects coverage gaps
+GIVEN a memory bank containing only `DECISION` entries
+WHEN `lorekeeper_reflect` is called with `focus: "coverage_gaps"`
+THEN the report's `summary.coverage_gaps` is ≥ 1
+AND each missing `EntryType` appears as a finding with `category: "coverage_gaps"`
+
+[HAPPY] Reflect detects lonely entries
+GIVEN entries A and B where A has `related_entries: []` and B has `related_entries: [A.id]`
+WHEN `lorekeeper_reflect` is called with `focus: "lonely"`
+THEN entry A appears as a finding with `category: "lonely"`
+AND entry B does NOT appear in the findings
+
+[HAPPY] Store returns contextual suggestions
+GIVEN a valid `lorekeeper_store` call with `entry_type: "DECISION"`
+WHEN the entry is successfully stored
+THEN the response includes a `suggestions` array with actionable guidance
+AND the suggestions reference `lorekeeper_reflect` and `lorekeeper_update`
+
+[EDGE] Store omits suggestions for non-key types
+GIVEN a valid `lorekeeper_store` call with `entry_type: "DEFERRED"`
+WHEN the entry is successfully stored
+THEN the response does NOT include a `suggestions` field (or it is empty)
 
 ---
 

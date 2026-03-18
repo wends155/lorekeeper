@@ -6,6 +6,13 @@
 - All technical debt from the initial audit has been remediated.
 - The project is fully functional, lint-compliant, and well-tested.
 
+### [x] Quality Improvements v0.3.3 (2026-03-18)
+- Added `coverage_gaps` and `lonely` categories to `lorekeeper_reflect` (7 total focus modes).
+- `lorekeeper_store` now returns contextual `suggestions` for key entry types (DECISION, CONSTRAINT, LESSON, PLAN).
+- Updated help text and tool descriptions.
+- 10 new tests (2 unit, 5 integration, 2 handler mock, 1 serde). Total: 107 tests passing.
+- **spec.md** synced to v3.
+
 ### [x] Fix: Missing Serde Defaults v0.3.2 (2026-03-16)
 - Fixed `SearchQuery.limit` and `Filters.limit`/`offset` missing `#[serde(default)]`, causing MCP tool failures when clients omit optional pagination params.
 - Added `const fn default_limit()` helper (limit→20, offset→0).

@@ -7,7 +7,7 @@ const HELP_OVERVIEW: &str = "# Lorekeeper - Workflow Guide\n\n\
     Lorekeeper is your persistent structured memory bank. It survives across sessions.\n\n\
     ## Session Start\n\
     1. Call lorekeeper_stats - see current state of the memory bank\n\
-    2. Call lorekeeper_reflect - surface stale, dead, or duplicate entries\n\
+    2. Call lorekeeper_reflect - surface stale, dead, or duplicate entries, and metadata gaps\n\
     3. Call lorekeeper_recent - load recent context (last 10 entries)\n\
     4. Call lorekeeper_search - check for prior decisions and constraints\n\n\
     ## During Work\n\
@@ -47,7 +47,7 @@ const HELP_TOOLS: &str = "# Lorekeeper Tools\n\n\
     - lorekeeper_by_type - list filtered by type\n\
     - lorekeeper_stats   - aggregate counts\n\n\
     ## Health\n\
-    - lorekeeper_reflect - analyze memory bank, surface stale/dead/hot/orphaned/contradictions\n\n\
+    - lorekeeper_reflect - analyze bank, surface stale/dead/hot/orphaned/contradictions/coverage_gaps/lonely\n\n\
     ## Help\n\
     - lorekeeper_help - this tool";
 

@@ -316,18 +316,20 @@ impl LoreHandler {
             Self::make_tool(
                 "lorekeeper_reflect",
                 "Analyze the memory bank and surface entries needing attention.\n\n\
-                 Returns a JSON report with findings across 5 categories:\n\
+                 Returns a JSON report with findings across several categories:\n\
                  - stale: entries not updated beyond the stale_days threshold\n\
                  - dead: entries with no access since creation\n\
                  - hot: frequently accessed entries (worth reviewing for freshness)\n\
                  - orphaned: entries whose related_entries links are broken\n\
-                 - contradictions: textually similar same-type entries (possible duplicates)\n\n\
+                 - contradictions: textually similar same-type entries (possible duplicates)\n\
+                 - coverage_gaps: missing entry types\n\
+                 - lonely: entries with no related_entries links\n\n\
                  WHEN TO USE: at session start (toolcheck) or after large batches of changes.",
                 HashMap::from([
                     ("focus".into(), json!({
                         "type": "string",
                         "description": "Which finding category to surface. Omit for all.",
-                        "enum": ["stale", "dead", "hot", "orphaned", "contradictions", "all"]
+                        "enum": ["stale", "dead", "hot", "orphaned", "contradictions", "coverage_gaps", "lonely", "all"]
                     })),
                     ("stale_days".into(), json!({
                         "type": "integer",
@@ -408,16 +410,42 @@ impl LoreHandler {
                     .find_similar(&title, body, entry_type, threshold)
                     .unwrap_or_default();
 
-                if similar.is_empty() {
-                    Ok(json!({ "status": "success", "id": entry.id.0 }))
+                let mut res = if similar.is_empty() {
+                    json!({ "status": "success", "id": entry.id.0 })
                 } else {
-                    Ok(json!({
+                    json!({
                         "status": "success",
                         "id": entry.id.0,
                         "similar_entries": similar,
                         "warning": "Potential duplicates detected — review similar_entries"
-                    }))
+                    })
+                };
+
+                let mut suggestions = vec![];
+                match entry_type {
+                    EntryType::Decision => {
+                        suggestions.push("Run `lorekeeper_reflect` with `focus: 'contradictions'` to check for conflicting decisions.".to_owned());
+                        suggestions.push(format!("Use `lorekeeper_update` on `{}` to link related entries once they are created.", entry.id.0));
+                    }
+                    EntryType::Constraint => {
+                        suggestions.push("Broaden your search with `lorekeeper_search` to ensure this constraint doesn't break existing plans.".to_owned());
+                    }
+                    EntryType::Lesson => {
+                        suggestions.push("Link this lesson to relevant `COMMIT` or `DECISION` entries to build a knowledge graph.".to_owned());
+                    }
+                    EntryType::Plan => {
+                        suggestions.push(
+                            "Create `STUB` entries for each major component in this plan."
+                                .to_owned(),
+                        );
+                    }
+                    _ => {}
                 }
+
+                if !suggestions.is_empty() {
+                    res["suggestions"] = json!(suggestions);
+                }
+                Ok(res)
             }
             "lorekeeper_update" => {
                 let id = args.get("id").and_then(|v| v.as_str()).ok_or("missing id")?;
@@ -1438,5 +1466,56 @@ mod tests {
         let result = handler.handle_tool_call(params);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("path does not exist"));
+    }
+
+    #[test]
+    fn handle_store_includes_suggestions() -> Result<(), String> {
+        let mut mock = MockEntryRepository::new();
+        mock.expect_store().times(1).returning(|_| Ok(test_entry("uuid1")));
+        mock.expect_find_similar().times(1).returning(|_, _, _, _| Ok(vec![]));
+
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "lorekeeper_store".to_owned(),
+            arguments: Some(to_map(&json!({
+                "entry_type": "DECISION",
+                "role": "architect",
+                "title": "D1"
+            }))),
+            meta: None,
+            task: None,
+        };
+
+        let result = handler.handle_tool_call(params)?;
+        let suggestions = result["suggestions"].as_array().ok_or("missing suggestions")?;
+        assert!(!suggestions.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn handle_store_no_suggestions_for_deferred() -> Result<(), String> {
+        let mut mock = MockEntryRepository::new();
+        mock.expect_store().times(1).returning(|_| Ok(test_entry("uuid1")));
+        mock.expect_find_similar().times(1).returning(|_, _, _, _| Ok(vec![]));
+
+        let handler = LoreHandler::with_defaults(Arc::new(mock));
+        let params = CallToolRequestParams {
+            name: "lorekeeper_store".to_owned(),
+            arguments: Some(to_map(&json!({
+                "entry_type": "DEFERRED",
+                "role": "architect",
+                "title": "D1"
+            }))),
+            meta: None,
+            task: None,
+        };
+
+        let result = handler.handle_tool_call(params)?;
+        // suggestions should be null or empty
+        assert!(
+            result["suggestions"].is_null()
+                || result["suggestions"].as_array().is_none_or(Vec::is_empty)
+        );
+        Ok(())
     }
 }

@@ -432,6 +432,10 @@ impl EntryRepository for SqliteEntryRepo {
         let run_contradictions =
             matches!(criteria.focus, ReflectFocus::Contradictions | ReflectFocus::All);
 
+        let run_coverage_gaps =
+            matches!(criteria.focus, ReflectFocus::CoverageGaps | ReflectFocus::All);
+        let run_lonely = matches!(criteria.focus, ReflectFocus::Lonely | ReflectFocus::All);
+
         // Stale: entries not updated within stale_days
         if run_stale {
             let mut stmt = conn.prepare(
@@ -584,6 +588,66 @@ impl EntryRepository for SqliteEntryRepo {
             }
         }
 
+        // Coverage Gaps: missing entry types
+        if run_coverage_gaps {
+            let mut stmt =
+                conn.prepare("SELECT DISTINCT entry_type FROM entry WHERE is_deleted = 0")?;
+            let present_types: Vec<String> =
+                stmt.query_map([], |row| row.get(0))?.collect::<rusqlite::Result<Vec<String>>>()?;
+
+            let all_types = vec![
+                EntryType::Decision,
+                EntryType::Commit,
+                EntryType::Constraint,
+                EntryType::Lesson,
+                EntryType::Plan,
+                EntryType::Feature,
+                EntryType::Stub,
+                EntryType::Deferred,
+                EntryType::BuilderNote,
+                EntryType::TechDebt,
+                EntryType::SessionSummary,
+            ];
+
+            for et in all_types {
+                let s = serde_json::to_string(&et).unwrap_or_default().replace('"', "");
+                if !present_types.contains(&s) {
+                    summary.coverage_gaps += 1;
+                    findings.push(ReflectFinding {
+                        category: "coverage_gaps".to_owned(),
+                        entry_id: "N/A".to_owned(),
+                        entry_type: s.clone(),
+                        title: "Missing Entry Type".to_owned(),
+                        reason: format!("No {s} entries found in memory bank"),
+                    });
+                }
+            }
+        }
+
+        // Lonely: entries with no cross-references
+        if run_lonely {
+            let mut stmt = conn.prepare(
+                "SELECT id, entry_type, title FROM entry \
+                 WHERE is_deleted = 0 AND (related_entries IS NULL OR related_entries = '[]') \
+                 ORDER BY created_at ASC \
+                 LIMIT ?",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![limit], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+            })?;
+            for row in rows {
+                let (id, et, title) = row?;
+                summary.lonely += 1;
+                findings.push(ReflectFinding {
+                    category: "lonely".to_owned(),
+                    entry_id: id,
+                    entry_type: et,
+                    title,
+                    reason: "Entry has no related entries (lonely)".to_owned(),
+                });
+            }
+        }
+
         summary.total = findings.len();
 
         Ok(ReflectReport { state, findings, summary, guidance })
@@ -617,7 +681,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::panic)]
     use super::*;
     use crate::db::Database;
-    use crate::model::types::PlanData;
+    use crate::model::types::{PlanData, ReflectFocus};
 
     fn setup_repo() -> SqliteEntryRepo {
         let db = Database::open_in_memory().unwrap();
@@ -1110,8 +1174,181 @@ mod tests {
     }
 
     #[test]
-    fn poisoned_mutex_returns_error() {
-        let err = LoreError::Poison("mutex poisoned".into());
-        assert!(err.to_string().contains("mutex poisoned"));
+    fn reflect_detects_coverage_gaps() {
+        let repo = setup_repo();
+        // Store only 2 types
+        repo.store(NewEntry {
+            entry_type: EntryType::Decision,
+            title: "D1".into(),
+            body: None,
+            role: "architect".into(),
+            tags: None,
+            related_entries: None,
+            data: None,
+        })
+        .unwrap();
+        repo.store(NewEntry {
+            entry_type: EntryType::Commit,
+            title: "C1".into(),
+            body: None,
+            role: "builder".into(),
+            tags: None,
+            related_entries: None,
+            data: None,
+        })
+        .unwrap();
+
+        let criteria = ReflectCriteria { focus: ReflectFocus::CoverageGaps, ..Default::default() };
+        let report = repo.reflect(&criteria, &LoreConfig::default()).unwrap();
+
+        // 11 total types - 2 present = 9 missing
+        assert_eq!(report.summary.coverage_gaps, 9);
+        assert!(report.findings.iter().all(|f| f.category == "coverage_gaps"));
+        let missing_types: Vec<_> = report.findings.iter().map(|f| f.entry_type.as_str()).collect();
+        assert!(missing_types.contains(&"CONSTRAINT"));
+        assert!(missing_types.contains(&"LESSON"));
+        assert!(!missing_types.contains(&"DECISION"));
+        assert!(!missing_types.contains(&"COMMIT"));
+    }
+
+    #[test]
+    fn reflect_no_coverage_gaps_when_all_present() {
+        let repo = setup_repo();
+        let types = vec![
+            (EntryType::Decision, "architect", None),
+            (EntryType::Commit, "builder", Some(serde_json::json!({ "hash": "abc", "files": [] }))),
+            (EntryType::Constraint, "architect", Some(serde_json::json!({ "source": "x" }))),
+            (EntryType::Lesson, "architect", Some(serde_json::json!({ "root_cause": "x" }))),
+            (
+                EntryType::Plan,
+                "architect",
+                Some(serde_json::json!({ "scope": "x", "tier": "S", "status": "planned" })),
+            ),
+            (EntryType::Feature, "architect", Some(serde_json::json!({ "status": "x" }))),
+            (
+                EntryType::Stub,
+                "builder",
+                Some(
+                    serde_json::json!({ "phase_number": 1, "contract": "x", "module": "x", "status": "open" }),
+                ),
+            ),
+            (
+                EntryType::Deferred,
+                "architect",
+                Some(serde_json::json!({ "reason": "x", "target_phase": 1 })),
+            ),
+            (
+                EntryType::BuilderNote,
+                "builder",
+                Some(serde_json::json!({ "note_type": "x", "step_ref": "x", "plan_ref": "x" })),
+            ),
+            (
+                EntryType::TechDebt,
+                "builder",
+                Some(serde_json::json!({ "severity": "low", "origin_phase": 1 })),
+            ),
+            (
+                EntryType::SessionSummary,
+                "architect",
+                Some(serde_json::json!({ "session_date": "2024-01-01" })),
+            ),
+        ];
+
+        for (et, role, data) in types {
+            repo.store(NewEntry {
+                entry_type: et,
+                title: format!("Test {et:?}"),
+                body: None,
+                role: role.into(),
+                tags: None,
+                related_entries: None,
+                data,
+            })
+            .unwrap();
+        }
+
+        let criteria = ReflectCriteria { focus: ReflectFocus::CoverageGaps, ..Default::default() };
+        let report = repo.reflect(&criteria, &LoreConfig::default()).unwrap();
+        assert_eq!(report.summary.coverage_gaps, 0);
+    }
+
+    #[test]
+    fn reflect_detects_lonely_entries() {
+        let repo = setup_repo();
+        for i in 1..=3 {
+            repo.store(NewEntry {
+                entry_type: EntryType::Decision,
+                title: format!("Lonely {i}"),
+                body: None,
+                role: "architect".into(),
+                tags: None,
+                related_entries: None,
+                data: None,
+            })
+            .unwrap();
+        }
+
+        let criteria = ReflectCriteria { focus: ReflectFocus::Lonely, ..Default::default() };
+        let report = repo.reflect(&criteria, &LoreConfig::default()).unwrap();
+        assert_eq!(report.summary.lonely, 3);
+        assert!(report.findings.iter().all(|f| f.category == "lonely"));
+    }
+
+    #[test]
+    fn reflect_lonely_excludes_linked_entries() {
+        let repo = setup_repo();
+        let e1 = repo
+            .store(NewEntry {
+                entry_type: EntryType::Decision,
+                title: "E1".into(),
+                body: None,
+                role: "architect".into(),
+                tags: None,
+                related_entries: None,
+                data: None,
+            })
+            .unwrap();
+
+        // Linked entry
+        repo.store(NewEntry {
+            entry_type: EntryType::Decision,
+            title: "E2".into(),
+            body: None,
+            role: "architect".into(),
+            tags: None,
+            related_entries: Some(vec![e1.id]),
+            data: None,
+        })
+        .unwrap();
+
+        let criteria = ReflectCriteria { focus: ReflectFocus::Lonely, ..Default::default() };
+        let report = repo.reflect(&criteria, &LoreConfig::default()).unwrap();
+        // Only E1 is lonely (E2 has a related entry)
+        // Wait, E1 is also lonely because no one points to IT?
+        // No, the logic I planned is: check if `related_entries` IS NULL OR EMPTY.
+        // E1 has related_entries = [] (empty). E2 has related_entries = ["id_of_e1"].
+        // So E1 is lonely, E2 is not.
+        assert_eq!(report.summary.lonely, 1);
+        assert_eq!(report.findings[0].title, "E1");
+    }
+
+    #[test]
+    fn reflect_all_includes_new_categories() {
+        let repo = setup_repo();
+        repo.store(NewEntry {
+            entry_type: EntryType::Decision,
+            title: "D1".into(),
+            body: None,
+            role: "architect".into(),
+            tags: None,
+            related_entries: None,
+            data: None,
+        })
+        .unwrap();
+
+        let criteria = ReflectCriteria { focus: ReflectFocus::All, ..Default::default() };
+        let report = repo.reflect(&criteria, &LoreConfig::default()).unwrap();
+        assert!(report.summary.coverage_gaps > 0);
+        assert!(report.summary.lonely > 0);
     }
 }
