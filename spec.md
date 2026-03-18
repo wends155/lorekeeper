@@ -6,7 +6,7 @@
 | **Version** | 3 |
 | **Last Updated** | 2026-03-18 |
 
-> Last verified against: `ba52770` (2026-03-18, v0.3.3-dev)
+> Last verified against: `0f65e6b` (2026-03-18, v0.3.3)
 
 ---
 
